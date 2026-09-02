@@ -10,5 +10,5 @@
     <string name="permission_required">Allow this app to install updates, then return and tap install again.</string>
     <string name="launching_installer">Opening Android installer…</string>
     <string name="update_error">Update error: %1$s</string>
-    <string name="dev_build_note">Development build · LVK Update Feed</string>
+    <string name="dev_build_note">0.1.1 update test · automatic dev feed enabled</string>
 </resources>
