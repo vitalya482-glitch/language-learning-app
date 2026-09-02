@@ -1,7 +1,26 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+val versionProperties = Properties().apply {
+    val versionFile = rootProject.file("version.properties")
+    check(versionFile.isFile) { "Missing version.properties" }
+    versionFile.inputStream().use { load(it) }
+}
+
+val appVersionName = versionProperties.getProperty("APP_VERSION_NAME")
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?: error("APP_VERSION_NAME is missing in version.properties")
+
+val androidVersionCode = versionProperties.getProperty("ANDROID_VERSION_CODE")
+    ?.trim()
+    ?.toIntOrNull()
+    ?.takeIf { it > 0 }
+    ?: error("ANDROID_VERSION_CODE must be a positive integer in version.properties")
 
 android {
     namespace = "kz.lvk.languagelearning.app"
@@ -11,8 +30,8 @@ android {
         applicationId = "kz.lvk.languagelearning"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = androidVersionCode
+        versionName = appVersionName
     }
 
     signingConfigs {
@@ -34,7 +53,7 @@ android {
             buildConfigField(
                 "String",
                 "UPDATE_MANIFEST_URL",
-                "\"https://raw.githubusercontent.com/vitalya482-glitch/LVK-Update-Feed/main/manifests/language-learning.json\"",
+                "\"https://github.com/vitalya482-glitch/language-learning-app/releases/download/dev-latest/language-learning-manifest.json\"",
             )
         }
         create("prod") {

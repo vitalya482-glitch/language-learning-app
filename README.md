@@ -7,12 +7,12 @@ Cross-platform AI-powered language learning app with local models, conversations
 The first Android build intentionally contains almost no product functionality. It proves the infrastructure that future development depends on:
 
 - displays the installed app version;
-- checks the existing **LVK Update Feed**;
+- checks for updates;
 - downloads a newer APK;
-- optionally verifies SHA-256 when the feed provides it;
+- verifies SHA-256 when the manifest provides it;
 - hands the APK to the Android package installer;
 - uses a stable development signing key so one dev build can update another;
-- builds and publishes `language-learning-dev.apk` automatically from `main`.
+- builds and publishes the Android dev channel automatically from `main`.
 
 ## Repository layout
 
@@ -24,16 +24,17 @@ android/
     common/            platform-neutral utilities
     designsystem/      Jetpack Compose design system
     network/           transport abstraction
-    update/            LVK update client + APK installer
+    update/            update client + APK installer
   feature/
     home/               version/update screen
 shared/
   native-ai/            future cross-platform C++ AI core
 ios/                     future Swift/SwiftUI client
-docs/                    architecture documentation
+tools/release/           release/manifest tooling
+docs/                    architecture and release documentation
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Android toolchain
 
@@ -43,15 +44,20 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - compile/target SDK 37
 - minimum SDK 26
 - Java 17
-
-The project uses Gradle 9.5. Android Studio can import the repository directly; CI installs the required Gradle version explicitly.
+- Gradle 9.5 through the committed Gradle Wrapper
 
 ## Build locally
 
-With JDK 17, Android SDK 37 and Gradle 9.5 installed:
+With JDK 17 and Android SDK 37 installed:
 
 ```bash
-gradle :android:app:assembleDevRelease
+./gradlew :android:app:assembleDevRelease
+```
+
+On Windows:
+
+```bat
+gradlew.bat :android:app:assembleDevRelease
 ```
 
 APK output:
@@ -60,20 +66,30 @@ APK output:
 android/app/build/outputs/apk/dev/release/app-dev-release.apk
 ```
 
-## CI / development APK
+## Versioning
 
-Every push to `main` runs unit tests, builds a signed development APK and publishes the rolling `dev-latest` prerelease.
+`version.properties` is the single source of truth:
+
+```properties
+APP_VERSION_NAME=0.1.0
+ANDROID_VERSION_CODE=1
+```
+
+A normal version bump changes only these values. CI generates the APK checksum, build metadata and update manifest automatically.
 
 ## Development update channel
 
-The rolling APK is published at the `dev-latest` GitHub Release. The application reads:
+The rolling development release is `dev-latest` and exposes stable public assets:
 
 ```text
-https://raw.githubusercontent.com/vitalya482-glitch/LVK-Update-Feed/main/manifests/language-learning.json
+language-learning-dev.apk
+language-learning-dev.apk.sha256
+language-learning-manifest.json
+build-info.json
 ```
 
-`dev` and future `prod` builds have different application IDs and update channels.
+The dev app reads the manifest directly from the rolling GitHub Release. No GitHub access token is embedded in the APK.
 
 ## Signing warning
 
-`signing/dev-update-test.keystore` is public **by design** and must only sign development builds. The future commercial production key must be private and provided to CI through secrets.
+`signing/dev-update-test.keystore` is public **by design** and must only sign development builds. The future commercial production key must be private and provided to CI through protected secrets.

@@ -1,19 +1,22 @@
-name: Android Dev APK
+name: Android CI & Dev Release
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: android-dev-release
+  group: android-dev-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    name: Test and build
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -27,25 +30,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle 9.5
+      - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.0'
 
-      - name: Bootstrap Gradle wrapper
-        run: |
-          gradle wrapper --gradle-version 9.5.0 --distribution-type bin
-          chmod +x gradlew
-
-      - name: Upload wrapper bootstrap
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-wrapper-bootstrap
-          path: |
-            gradlew
-            gradlew.bat
-            gradle/wrapper/gradle-wrapper.jar
-            gradle/wrapper/gradle-wrapper.properties
+      - name: Verify Gradle wrapper
+        run: ./gradlew --version
 
       - name: Unit tests
         run: ./gradlew :android:core:common:test
@@ -53,30 +42,78 @@ jobs:
       - name: Build signed dev APK
         run: ./gradlew :android:app:assembleDevRelease
 
-      - name: Prepare artifact
+      - name: Prepare reproducible release bundle
         run: |
-          mkdir -p dist
-          cp android/app/build/outputs/apk/dev/release/app-dev-release.apk dist/language-learning-dev.apk
-          sha256sum dist/language-learning-dev.apk | tee dist/language-learning-dev.apk.sha256
+          COMMIT_SUBJECT=$(git log -1 --pretty=%s)
+          python3 tools/release/prepare_android_release.py \
+            --version-file version.properties \
+            --metadata android/app/build/outputs/apk/dev/release/output-metadata.json \
+            --apk-directory android/app/build/outputs/apk/dev/release \
+            --output-directory dist \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-tag dev-latest \
+            --commit "$GITHUB_SHA" \
+            --commit-subject "$COMMIT_SUBJECT" \
+            --run-id "$GITHUB_RUN_ID"
 
-      - name: Upload workflow artifact
+      - name: Upload build bundle
         uses: actions/upload-artifact@v4
         with:
-          name: language-learning-dev-apk
+          name: language-learning-dev-release
+          if-no-files-found: error
+          retention-days: 14
           path: |
             dist/language-learning-dev.apk
             dist/language-learning-dev.apk.sha256
+            dist/language-learning-manifest.json
+            dist/build-info.json
+            dist/release-notes.md
 
-      - name: Publish rolling dev release
+  publish:
+    name: Publish rolling dev release
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download build bundle
+        uses: actions/download-artifact@v5
+        with:
+          name: language-learning-dev-release
+          path: dist
+
+      - name: Publish stable dev-latest URLs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete dev-latest --yes --cleanup-tag || true
-          gh release create dev-latest \
-            --target "$GITHUB_SHA" \
-            --title "Development build" \
-            --notes "Automatic Android development build from main. Commit: $GITHUB_SHA" \
-            --prerelease
+          VERSION_NAME=$(python3 -c 'import json; print(json.load(open("dist/build-info.json", encoding="utf-8"))["versionName"])')
+
+          git tag -f dev-latest "$GITHUB_SHA"
+          git push origin refs/tags/dev-latest --force
+
+          if gh release view dev-latest >/dev/null 2>&1; then
+            gh release edit dev-latest \
+              --title "Development build ${VERSION_NAME}" \
+              --notes-file dist/release-notes.md
+          else
+            gh release create dev-latest \
+              --target "$GITHUB_SHA" \
+              --title "Development build ${VERSION_NAME}" \
+              --notes-file dist/release-notes.md \
+              --prerelease
+          fi
+
           gh release upload dev-latest \
             dist/language-learning-dev.apk \
-            dist/language-learning-dev.apk.sha256
+            dist/language-learning-dev.apk.sha256 \
+            dist/language-learning-manifest.json \
+            dist/build-info.json \
+            --clobber
