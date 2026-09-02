@@ -19,8 +19,6 @@ jobs:
     name: Test and build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout
@@ -32,27 +30,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle 9.5 for one-time wrapper normalization
+      - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.0'
-          validate-wrappers: false
-
-      - name: Normalize Gradle wrapper
-        run: |
-          gradle wrapper --gradle-version 9.5.0 --distribution-type bin
-          chmod +x gradlew
-
-      - name: Commit canonical wrapper when needed
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add gradlew gradlew.bat gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties
-          if ! git diff --cached --quiet; then
-            git commit -m "Normalize Gradle 9.5 wrapper"
-            git push origin HEAD:main
-          fi
 
       - name: Verify Gradle wrapper
         run: ./gradlew --version
