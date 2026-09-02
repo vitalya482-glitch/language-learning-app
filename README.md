@@ -60,6 +60,10 @@ APK output:
 android/app/build/outputs/apk/dev/release/app-dev-release.apk
 ```
 
+## CI / development APK
+
+Every push to `main` runs unit tests, builds a signed development APK and publishes the rolling `dev-latest` prerelease.
+
 ## Development update channel
 
 The rolling APK is published at the `dev-latest` GitHub Release. The application reads:
