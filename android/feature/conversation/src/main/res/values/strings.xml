@@ -1,0 +1,10 @@
+<resources>
+    <string name="conversation_title">Native AI smoke test</string>
+    <string name="conversation_back">Back</string>
+    <string name="conversation_loading">Loading the native C++ engine…</string>
+    <string name="conversation_ready">The native engine is ready. Send a message to test the JNI bridge.</string>
+    <string name="conversation_input_label">Message</string>
+    <string name="conversation_send">Send to C++</string>
+    <string name="conversation_retry">Retry</string>
+    <string name="conversation_error">Native engine error: %1$s</string>
+</resources>

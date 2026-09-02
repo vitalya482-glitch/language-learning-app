@@ -93,6 +93,8 @@ dependencies {
     implementation(project(":android:core:update"))
     implementation(project(":android:core:designsystem"))
     implementation(project(":android:core:ai-api"))
+    implementation(project(":android:core:ai-native"))
+    implementation(project(":android:feature:conversation"))
     implementation(project(":android:feature:home"))
 
     implementation(libs.androidx.activity.compose)

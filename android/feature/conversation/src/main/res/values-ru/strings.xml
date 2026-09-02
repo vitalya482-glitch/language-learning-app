@@ -1,0 +1,10 @@
+<resources>
+    <string name="conversation_title">Проверка Native AI</string>
+    <string name="conversation_back">Назад</string>
+    <string name="conversation_loading">Загружаем нативный C++-движок…</string>
+    <string name="conversation_ready">Нативный движок готов. Отправьте сообщение, чтобы проверить JNI-мост.</string>
+    <string name="conversation_input_label">Сообщение</string>
+    <string name="conversation_send">Отправить в C++</string>
+    <string name="conversation_retry">Повторить</string>
+    <string name="conversation_error">Ошибка нативного движка: %1$s</string>
+</resources>

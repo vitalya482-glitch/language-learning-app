@@ -10,8 +10,10 @@ The repository is intentionally a monorepo so Android, iOS and shared native AI 
 - `android/core/update` — LVK Update Feed client, APK download, checksum verification and Android installer handoff.
 - `android/core/designsystem` — shared Android Compose theme/components.
 - `android/core/ai-api` — platform-neutral contract for future local AI engines.
+- `android/core/ai-native` — Android JNI adapter for the shared C++ AI core.
+- `android/feature/conversation` — first end-to-end conversation and native-engine smoke-test UI.
 - `android/feature/home` — first feature module; currently only version/update UI.
-- `shared/native-ai` — reserved for a C/C++ inference core reusable by Android (JNI/NDK), iOS (Swift bridge) and potentially desktop.
+- `shared/native-ai` — platform-neutral C++ model lifecycle/inference core reusable by Android (JNI/NDK), iOS (Swift bridge) and potentially desktop. The current deterministic implementation proves the integration boundary before a real model runtime is linked.
 - `ios` — reserved for the future Swift/SwiftUI application.
 
 ## Dependency direction
