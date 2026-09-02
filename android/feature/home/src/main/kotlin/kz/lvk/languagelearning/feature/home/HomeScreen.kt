@@ -7,10 +7,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kz.lvk.languagelearning.core.designsystem.components.LvkOutlinedButton
+import kz.lvk.languagelearning.core.designsystem.components.LvkPrimaryButton
 import kz.lvk.languagelearning.core.update.UpdateManifest
 import kz.lvk.languagelearning.core.update.UpdateState
 
@@ -54,7 +54,28 @@ fun HomeScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
+
+            LvkPrimaryButton(
+                text = stringResource(R.string.start_learning),
+                onClick = {},
+            )
+            Spacer(Modifier.height(12.dp))
+            LvkPrimaryButton(
+                text = stringResource(R.string.history),
+                onClick = {},
+            )
+            Spacer(Modifier.height(12.dp))
+            LvkPrimaryButton(
+                text = stringResource(R.string.statistics),
+                onClick = {},
+            )
+            Spacer(Modifier.height(12.dp))
+            LvkPrimaryButton(
+                text = stringResource(R.string.settings),
+                onClick = {},
+            )
+            Spacer(Modifier.height(24.dp))
 
             when (updateState) {
                 UpdateState.Idle -> Unit
@@ -67,12 +88,10 @@ fun HomeScreen(
                 is UpdateState.Available -> {
                     Text(stringResource(R.string.update_available, updateState.manifest.latestVersion))
                     Spacer(Modifier.height(12.dp))
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
+                    LvkPrimaryButton(
+                        text = stringResource(R.string.install_update),
                         onClick = { onInstallUpdate(updateState.manifest) },
-                    ) {
-                        Text(stringResource(R.string.install_update))
-                    }
+                    )
                 }
                 is UpdateState.Downloading -> {
                     CircularProgressIndicator()
@@ -90,13 +109,11 @@ fun HomeScreen(
             }
 
             Spacer(Modifier.height(24.dp))
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
+            LvkOutlinedButton(
+                text = stringResource(R.string.check_updates),
                 enabled = updateState !is UpdateState.Checking && updateState !is UpdateState.Downloading,
                 onClick = onCheckForUpdates,
-            ) {
-                Text(stringResource(R.string.check_updates))
-            }
+            )
         }
     }
 }
