@@ -11,24 +11,25 @@ ANDROID_VERSION_CODE=1
 
 For a normal Android version bump, edit only these two values. Do not hard-code versions in Gradle files or update manifests.
 
-`APP_VERSION_NAME` is the user-facing semantic version. `ANDROID_VERSION_CODE` is Android's monotonically increasing integer and must increase for every installable update.
+`APP_VERSION_NAME` is the user-facing semantic version. `ANDROID_VERSION_CODE` is Android's monotonically increasing integer and must increase for every installable update. CI rejects a pushed version bump when the Android version code does not increase.
 
 ## Development channel
 
-Every push to `main` runs the Android workflow. Pull requests run the same build verification but do not publish a release.
+Every push to `main` runs the Android workflow. Pull requests run the same build verification but never publish a release.
 
-The workflow:
+The workflow always:
 
-1. uses the committed Gradle Wrapper;
+1. validates the committed Gradle Wrapper;
 2. runs unit tests;
 3. builds the signed `devRelease` APK;
-4. verifies the APK metadata against `version.properties`;
+4. verifies APK metadata against `version.properties`;
 5. computes SHA-256 and file size;
 6. generates an LVK-compatible update manifest;
-7. uploads the complete bundle as a GitHub Actions artifact;
-8. for `main`, updates the rolling `dev-latest` GitHub Release.
+7. uploads the complete bundle as a short-lived GitHub Actions artifact.
 
-Stable public URLs are therefore:
+The rolling `dev-latest` release is replaced only when `version.properties` changes on `main`, or when the workflow is started manually. Normal code/documentation commits therefore cannot silently replace an APK while keeping the same Android `versionCode`.
+
+Stable public URLs are:
 
 ```text
 https://github.com/vitalya482-glitch/language-learning-app/releases/download/dev-latest/language-learning-dev.apk
@@ -48,9 +49,10 @@ A production signing key will be created separately and stored outside the repos
 1. Change `APP_VERSION_NAME` and increment `ANDROID_VERSION_CODE` in `version.properties`.
 2. Commit and push to `main`.
 3. Wait for `Android CI & Dev Release` to pass.
-4. The existing app will see the generated manifest and offer the new APK.
+4. CI replaces the rolling APK, SHA-256, build metadata and update manifest automatically.
+5. The existing app sees the generated manifest and offers the new APK.
 
-No manual SHA-256 calculation, manifest editing, or APK upload is required.
+No manual SHA-256 calculation, manifest editing or APK upload is required.
 
 ## Legacy bridge from 0.1.0
 
