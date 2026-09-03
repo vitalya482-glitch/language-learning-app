@@ -1,6 +1,10 @@
 <resources>
     <string name="settings_title">Настройки</string>
     <string name="settings_back">Назад</string>
+    <string name="settings_learning_title">Профиль обучения</string>
+    <string name="settings_native_language">Родной язык</string>
+    <string name="settings_target_language">Изучаемый язык</string>
+    <string name="settings_learning_level">Уровень</string>
     <string name="settings_voice_title">Голос озвучивания</string>
     <string name="settings_voice_system_note">Голоса предоставляет системный Android Text-to-Speech. Они устанавливаются и хранятся в системе телефона и не являются частью Language Learning.</string>
     <string name="settings_voice_language">Язык: %1$s</string>
