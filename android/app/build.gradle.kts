@@ -95,6 +95,7 @@ dependencies {
     implementation(project(":android:core:ai-api"))
     implementation(project(":android:core:ai-native"))
     implementation(project(":android:core:speech"))
+    implementation(project(":android:core:settings"))
     implementation(project(":android:feature:conversation"))
     implementation(project(":android:feature:home"))
     implementation(project(":android:feature:settings"))
