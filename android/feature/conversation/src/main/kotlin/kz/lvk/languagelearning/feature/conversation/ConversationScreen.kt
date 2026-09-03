@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kz.lvk.languagelearning.core.speech.AndroidOnDeviceSpeechRecognizer
+import kz.lvk.languagelearning.core.speech.AndroidSystemTextToSpeech
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
 import kz.lvk.languagelearning.core.speech.SpeechLanguages
 import kz.lvk.languagelearning.core.speech.SpeechRecognitionState
@@ -69,11 +71,22 @@ fun ConversationScreen(
     val speechRecognizer = remember(context) {
         AndroidOnDeviceSpeechRecognizer(context.applicationContext)
     }
+    val systemTts = remember(context) {
+        AndroidSystemTextToSpeech(context.applicationContext)
+    }
     val speechState by speechRecognizer.state.collectAsStateWithLifecycle()
+    val ttsState by systemTts.state.collectAsStateWithLifecycle()
     val speechLanguageDisplayName = speechLanguage.displayName()
 
-    DisposableEffect(speechRecognizer) {
-        onDispose { speechRecognizer.close() }
+    DisposableEffect(speechRecognizer, systemTts) {
+        onDispose {
+            speechRecognizer.close()
+            systemTts.close()
+        }
+    }
+
+    LaunchedEffect(speechLanguage.tag) {
+        systemTts.prepare(speechLanguage)
     }
 
     LaunchedEffect(speechState.finalText) {
@@ -162,6 +175,7 @@ fun ConversationScreen(
                 },
                 onStartListening = {
                     microphonePermissionDenied = false
+                    systemTts.stop()
                     speechRecognizer.startListening(speechLanguage)
                 },
                 onStopListening = speechRecognizer::stopListening,
@@ -180,6 +194,34 @@ fun ConversationScreen(
                 minLines = 2,
                 maxLines = 4,
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    if (ttsState.isSpeaking) {
+                        systemTts.stop()
+                    } else {
+                        systemTts.speak(input, speechLanguage)
+                    }
+                },
+                enabled = input.isNotBlank() && ttsState.isReady,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (ttsState.isSpeaking) {
+                        stringResource(R.string.conversation_stop_speaking)
+                    } else {
+                        stringResource(R.string.conversation_speak_text)
+                    },
+                )
+            }
+            ttsState.errorMessage?.let { ttsError ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.conversation_tts_error, ttsError),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(10.dp))
             Button(
                 onClick = {
