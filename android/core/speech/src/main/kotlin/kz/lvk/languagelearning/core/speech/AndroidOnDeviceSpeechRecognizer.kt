@@ -20,6 +20,8 @@ data class SpeechRecognitionState(
     val partialText: String = "",
     val finalText: String = "",
     val errorMessage: String? = null,
+    val languageModelDownloadRequired: Boolean = false,
+    val languageModelDownloadRequested: Boolean = false,
 )
 
 class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
@@ -32,6 +34,8 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
     } else {
         null
     }
+
+    private var lastLanguageTag: String = "en-US"
 
     private val _state = MutableStateFlow(SpeechRecognitionState(isAvailable = available))
     val state: StateFlow<SpeechRecognitionState> = _state.asStateFlow()
@@ -51,12 +55,18 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             }
 
             override fun onError(error: Int) {
+                val languageDownloadRequired =
+                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
                 _state.update {
                     it.copy(
                         isListening = false,
                         isFinalizing = false,
                         rmsDb = 0f,
                         errorMessage = errorMessage(error),
+                        languageModelDownloadRequired = languageDownloadRequired,
+                        languageModelDownloadRequested = false,
                     )
                 }
             }
@@ -71,6 +81,8 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                         partialText = "",
                         finalText = text,
                         errorMessage = null,
+                        languageModelDownloadRequired = false,
+                        languageModelDownloadRequested = false,
                     )
                 }
             }
@@ -92,6 +104,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             return
         }
 
+        lastLanguageTag = languageTag
         _state.update {
             it.copy(
                 isListening = true,
@@ -100,17 +113,12 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                 partialText = "",
                 finalText = "",
                 errorMessage = null,
+                languageModelDownloadRequired = false,
+                languageModelDownloadRequested = false,
             )
         }
 
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-        activeRecognizer.startListening(intent)
+        activeRecognizer.startListening(recognitionIntent(languageTag))
     }
 
     fun stopListening() {
@@ -120,9 +128,62 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         }
     }
 
+    fun requestLanguageModelDownload(languageTag: String = lastLanguageTag) {
+        val activeRecognizer = recognizer
+        if (activeRecognizer == null) {
+            _state.update {
+                it.copy(errorMessage = "On-device speech recognition is not available on this device")
+            }
+            return
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            _state.update {
+                it.copy(
+                    languageModelDownloadRequired = false,
+                    languageModelDownloadRequested = false,
+                    errorMessage = "Android 13 or newer is required to request an offline speech language model",
+                )
+            }
+            return
+        }
+
+        lastLanguageTag = languageTag
+        _state.update {
+            it.copy(
+                isListening = false,
+                isFinalizing = false,
+                languageModelDownloadRequired = false,
+                languageModelDownloadRequested = true,
+                errorMessage = null,
+            )
+        }
+
+        runCatching {
+            activeRecognizer.triggerModelDownload(recognitionIntent(languageTag))
+        }.onFailure { error ->
+            _state.update {
+                it.copy(
+                    languageModelDownloadRequested = false,
+                    languageModelDownloadRequired = true,
+                    errorMessage = error.message ?: "Unable to request speech language model download",
+                )
+            }
+        }
+    }
+
     override fun close() {
         recognizer?.destroy()
     }
+
+    private fun recognitionIntent(languageTag: String): Intent =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
 
     private fun firstResult(bundle: Bundle?): String =
         bundle
@@ -134,12 +195,18 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
         SpeechRecognizer.ERROR_CLIENT -> "Speech recognizer client error"
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required"
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ->
+            "The requested language is not supported by the on-device speech recognizer"
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+            "The requested language is supported but its offline speech model is not downloaded"
         SpeechRecognizer.ERROR_NETWORK,
         SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Offline speech recognizer requested network access"
         SpeechRecognizer.ERROR_NO_MATCH -> "Speech was not recognized"
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer is busy"
         SpeechRecognizer.ERROR_SERVER -> "Speech recognizer service error"
+        SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "Speech recognizer service disconnected"
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected"
+        SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Too many speech recognition requests"
         else -> "Speech recognition error: $error"
     }
 }

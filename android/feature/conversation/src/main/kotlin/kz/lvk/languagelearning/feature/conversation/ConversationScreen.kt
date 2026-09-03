@@ -151,6 +151,9 @@ fun ConversationScreen(
                     speechRecognizer.startListening(languageTag = "en-US")
                 },
                 onStopListening = speechRecognizer::stopListening,
+                onDownloadLanguageModel = {
+                    speechRecognizer.requestLanguageModelDownload(languageTag = "en-US")
+                },
             )
 
             Spacer(Modifier.height(14.dp))
@@ -186,6 +189,7 @@ private fun SpeechInputControl(
     hasMicrophonePermission: () -> Boolean,
     onStartListening: () -> Unit,
     onStopListening: () -> Unit,
+    onDownloadLanguageModel: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -238,7 +242,7 @@ private fun SpeechInputControl(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp),
+                .height(104.dp),
             contentAlignment = Alignment.Center,
         ) {
             val speechError = speechState.errorMessage
@@ -280,6 +284,28 @@ private fun SpeechInputControl(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+
+                speechState.languageModelDownloadRequired -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = stringResource(R.string.speech_language_model_missing),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = onDownloadLanguageModel) {
+                        Text(stringResource(R.string.speech_download_language_model))
+                    }
+                }
+
+                speechState.languageModelDownloadRequested -> Text(
+                    text = stringResource(R.string.speech_language_model_download_requested),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
 
                 speechError != null -> Text(
                     text = speechError,
