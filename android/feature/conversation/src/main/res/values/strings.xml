@@ -13,7 +13,7 @@
     <string name="speech_recognizing">Converting speech to text…</string>
     <string name="speech_unavailable">On-device speech recognition is unavailable on this device or Android version.</string>
     <string name="speech_permission_denied">Microphone access is required. Hold the button again to request permission.</string>
-    <string name="speech_language_model_missing">English is supported, but its offline speech model is not downloaded on this phone.</string>
-    <string name="speech_download_language_model">Download English speech model</string>
-    <string name="speech_language_model_download_requested">Android was asked to download the English offline speech model. Complete any system prompt, wait for the download, then hold Talk again.</string>
+    <string name="speech_language_model_missing">Local recognition for the selected language (%1$s) needs an Android system language package. It is installed in the phone system and is not part of the Language Learning app.</string>
+    <string name="speech_download_language_model">Download system package: %1$s</string>
+    <string name="speech_language_model_download_requested">Android was asked to download the system speech package for “%1$s”. Complete any system prompt, wait for the download, then hold Talk again.</string>
 </resources>
