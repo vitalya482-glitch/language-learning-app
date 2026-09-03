@@ -2,6 +2,7 @@ package kz.lvk.languagelearning.feature.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,7 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,31 +28,44 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.lvk.languagelearning.core.settings.AppLanguage
+import kz.lvk.languagelearning.core.settings.AppSettings
+import kz.lvk.languagelearning.core.settings.LanguageCatalog
+import kz.lvk.languagelearning.core.settings.LearningLevel
 import kz.lvk.languagelearning.core.speech.AndroidSystemTextToSpeech
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
-import kz.lvk.languagelearning.core.speech.SpeechLanguages
 
 @Composable
 fun SettingsScreen(
+    appSettings: AppSettings,
     onBack: () -> Unit,
-    speechLanguage: SpeechLanguage = SpeechLanguages.English,
+    onNativeLanguageChange: (AppLanguage) -> Unit,
+    onTargetLanguageChange: (AppLanguage) -> Unit,
+    onLearningLevelChange: (LearningLevel) -> Unit,
+    onTtsVoiceChange: (AppLanguage, String?) -> Unit,
 ) {
     val context = LocalContext.current
     val systemTts = remember(context) {
         AndroidSystemTextToSpeech(context.applicationContext)
     }
     val ttsState by systemTts.state.collectAsStateWithLifecycle()
-    val languageName = speechLanguage.displayName()
+    val targetLanguage = appSettings.targetLanguage
+    val speechLanguage = remember(targetLanguage.tag) {
+        SpeechLanguage(targetLanguage.tag)
+    }
+    val preferredVoiceId = appSettings.ttsVoiceIdsByLanguage[targetLanguage.tag]
 
-    LaunchedEffect(speechLanguage.tag) {
-        systemTts.prepare(speechLanguage)
+    LaunchedEffect(targetLanguage.tag, preferredVoiceId) {
+        systemTts.prepare(speechLanguage, preferredVoiceId)
     }
 
     DisposableEffect(systemTts) {
@@ -83,6 +101,42 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(28.dp))
                 Text(
+                    text = stringResource(R.string.settings_learning_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(14.dp))
+
+                SettingsChoice(
+                    label = stringResource(R.string.settings_native_language),
+                    selectedText = appSettings.nativeLanguage.displayName(),
+                    options = LanguageCatalog.all,
+                    optionText = { it.displayName() },
+                    onSelected = onNativeLanguageChange,
+                )
+                Spacer(Modifier.height(14.dp))
+
+                SettingsChoice(
+                    label = stringResource(R.string.settings_target_language),
+                    selectedText = targetLanguage.displayName(),
+                    options = LanguageCatalog.all,
+                    optionText = { it.displayName() },
+                    onSelected = onTargetLanguageChange,
+                )
+                Spacer(Modifier.height(14.dp))
+
+                SettingsChoice(
+                    label = stringResource(R.string.settings_learning_level),
+                    selectedText = appSettings.learningLevel.name,
+                    options = LearningLevel.entries,
+                    optionText = { it.name },
+                    onSelected = onLearningLevelChange,
+                )
+
+                Spacer(Modifier.height(28.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(28.dp))
+
+                Text(
                     text = stringResource(R.string.settings_voice_title),
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -94,7 +148,10 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = stringResource(R.string.settings_voice_language, languageName),
+                    text = stringResource(
+                        R.string.settings_voice_language,
+                        targetLanguage.displayName(),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -134,6 +191,7 @@ fun SettingsScreen(
                                 .fillMaxWidth()
                                 .clickable {
                                     systemTts.selectVoice(speechLanguage, voice.id)
+                                    onTtsVoiceChange(targetLanguage, voice.id)
                                 }
                                 .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -142,6 +200,7 @@ fun SettingsScreen(
                                 selected = voice.id == ttsState.selectedVoiceId,
                                 onClick = {
                                     systemTts.selectVoice(speechLanguage, voice.id)
+                                    onTtsVoiceChange(targetLanguage, voice.id)
                                 },
                             )
                             Column(
@@ -165,6 +224,55 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> SettingsChoice(
+    label: String,
+    selectedText: String,
+    options: List<T>,
+    optionText: (T) -> String,
+    onSelected: (T) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(selectedText)
+                    Text("▾")
+                }
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(optionText(option)) },
+                        onClick = {
+                            expanded = false
+                            onSelected(option)
+                        },
+                    )
                 }
             }
         }
