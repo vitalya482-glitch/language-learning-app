@@ -7,4 +7,10 @@
     <string name="conversation_send">Send to C++</string>
     <string name="conversation_retry">Retry</string>
     <string name="conversation_error">Native engine error: %1$s</string>
+    <string name="speech_talk_button">Talk</string>
+    <string name="speech_listening_button">Listening…</string>
+    <string name="speech_hold_to_talk">Hold the button while speaking</string>
+    <string name="speech_recognizing">Converting speech to text…</string>
+    <string name="speech_unavailable">On-device speech recognition is unavailable on this device or Android version.</string>
+    <string name="speech_permission_denied">Microphone access is required. Hold the button again to request permission.</string>
 </resources>

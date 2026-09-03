@@ -24,6 +24,7 @@ include(
     ":android:core:designsystem",
     ":android:core:ai-api",
     ":android:core:ai-native",
+    ":android:core:speech",
     ":android:feature:conversation",
     ":android:feature:home",
 )

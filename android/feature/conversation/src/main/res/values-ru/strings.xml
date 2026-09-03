@@ -7,4 +7,10 @@
     <string name="conversation_send">Отправить в C++</string>
     <string name="conversation_retry">Повторить</string>
     <string name="conversation_error">Ошибка нативного движка: %1$s</string>
+    <string name="speech_talk_button">Говорить</string>
+    <string name="speech_listening_button">Слушаю…</string>
+    <string name="speech_hold_to_talk">Удерживайте кнопку, пока говорите</string>
+    <string name="speech_recognizing">Преобразуем речь в текст…</string>
+    <string name="speech_unavailable">Локальное распознавание речи недоступно на этом устройстве или версии Android.</string>
+    <string name="speech_permission_denied">Нужен доступ к микрофону. Удержите кнопку ещё раз, чтобы запросить разрешение.</string>
 </resources>
