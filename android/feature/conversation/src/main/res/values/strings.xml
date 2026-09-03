@@ -4,6 +4,9 @@
     <string name="conversation_loading">Loading the native C++ engine…</string>
     <string name="conversation_ready">The native engine is ready. Send a message to test the JNI bridge.</string>
     <string name="conversation_input_label">Message</string>
+    <string name="conversation_speak_text">Speak text</string>
+    <string name="conversation_stop_speaking">Stop speaking</string>
+    <string name="conversation_tts_error">System voice: %1$s</string>
     <string name="conversation_send">Send to C++</string>
     <string name="conversation_retry">Retry</string>
     <string name="conversation_error">Native engine error: %1$s</string>
