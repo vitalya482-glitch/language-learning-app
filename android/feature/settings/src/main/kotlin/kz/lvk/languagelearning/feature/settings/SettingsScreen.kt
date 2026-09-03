@@ -3,6 +3,7 @@ package kz.lvk.languagelearning.feature.settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -52,66 +55,80 @@ fun SettingsScreen(
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .navigationBarsPadding()
-                .padding(20.dp),
+                .navigationBarsPadding(),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                top = 20.dp,
+                end = 20.dp,
+                bottom = 28.dp,
+            ),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onBack) {
-                    Text(stringResource(R.string.settings_back))
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onBack) {
+                        Text(stringResource(R.string.settings_back))
+                    }
+                    Text(
+                        text = stringResource(R.string.settings_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
                 }
-                Text(
-                    text = stringResource(R.string.settings_title),
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
 
-            Spacer(Modifier.height(28.dp))
-            Text(
-                text = stringResource(R.string.settings_voice_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.settings_voice_system_note),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.settings_voice_language, languageName),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(28.dp))
+                Text(
+                    text = stringResource(R.string.settings_voice_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.settings_voice_system_note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.settings_voice_language, languageName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(20.dp))
+            }
 
             when {
                 !ttsState.isReady && ttsState.errorMessage == null -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator()
-                        Text(stringResource(R.string.settings_voice_loading))
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            CircularProgressIndicator()
+                            Text(stringResource(R.string.settings_voice_loading))
+                        }
                     }
                 }
 
                 ttsState.voices.isEmpty() -> {
-                    Text(
-                        text = ttsState.errorMessage
-                            ?: stringResource(R.string.settings_voice_none),
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    item {
+                        Text(
+                            text = ttsState.errorMessage
+                                ?: stringResource(R.string.settings_voice_none),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
 
                 else -> {
-                    ttsState.voices.forEach { voice ->
+                    items(
+                        items = ttsState.voices,
+                        key = { it.id },
+                    ) { voice ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
