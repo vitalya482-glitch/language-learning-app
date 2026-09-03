@@ -13,7 +13,7 @@
     <string name="speech_recognizing">Преобразуем речь в текст…</string>
     <string name="speech_unavailable">Локальное распознавание речи недоступно на этом устройстве или версии Android.</string>
     <string name="speech_permission_denied">Нужен доступ к микрофону. Удержите кнопку ещё раз, чтобы запросить разрешение.</string>
-    <string name="speech_language_model_missing">Английский язык поддерживается, но локальный пакет распознавания ещё не скачан на телефон.</string>
-    <string name="speech_download_language_model">Скачать английский пакет</string>
-    <string name="speech_language_model_download_requested">Android получил запрос на загрузку локального английского пакета. Подтвердите системное окно, если оно появится, дождитесь загрузки и снова удерживайте «Говорить».</string>
+    <string name="speech_language_model_missing">Для локального распознавания выбранного языка (%1$s) нужен системный языковой пакет Android. Он устанавливается в систему телефона и не является частью приложения Language Learning.</string>
+    <string name="speech_download_language_model">Скачать системный пакет: %1$s</string>
+    <string name="speech_language_model_download_requested">Android получил запрос на загрузку системного пакета для языка «%1$s». Подтвердите системное окно, если оно появится, дождитесь загрузки и снова удерживайте «Говорить».</string>
 </resources>
