@@ -14,7 +14,7 @@ data class AppLanguage(
             .ifBlank { tag }
 
         return rawName.replaceFirstChar { first ->
-            if (first.isLowerCase()) first.titlecase(locale) else first.toString()
+            if (first.isLowerCase()) first.titlecase() else first.toString()
         }
     }
 }
