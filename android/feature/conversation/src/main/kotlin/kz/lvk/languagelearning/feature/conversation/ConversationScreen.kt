@@ -241,6 +241,7 @@ private fun SpeechInputControl(
                 .height(54.dp),
             contentAlignment = Alignment.Center,
         ) {
+            val speechError = speechState.errorMessage
             when {
                 !speechState.isAvailable -> Text(
                     text = stringResource(R.string.speech_unavailable),
@@ -280,8 +281,8 @@ private fun SpeechInputControl(
                     )
                 }
 
-                speechState.errorMessage != null -> Text(
-                    text = speechState.errorMessage,
+                speechError != null -> Text(
+                    text = speechError,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     textAlign = TextAlign.Center,
