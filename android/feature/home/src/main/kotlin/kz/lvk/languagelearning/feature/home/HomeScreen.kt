@@ -28,6 +28,7 @@ fun HomeScreen(
     versionCode: Long,
     updateState: UpdateState,
     onStartLearning: () -> Unit,
+    onSettings: () -> Unit,
     onCheckForUpdates: () -> Unit,
     onInstallUpdate: (UpdateManifest) -> Unit,
 ) {
@@ -74,7 +75,7 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
             LvkPrimaryButton(
                 text = stringResource(R.string.settings),
-                onClick = {},
+                onClick = onSettings,
             )
             Spacer(Modifier.height(24.dp))
 
