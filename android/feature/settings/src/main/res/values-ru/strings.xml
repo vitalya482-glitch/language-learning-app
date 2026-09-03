@@ -1,0 +1,11 @@
+<resources>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_back">Назад</string>
+    <string name="settings_voice_title">Голос озвучивания</string>
+    <string name="settings_voice_system_note">Голоса предоставляет системный Android Text-to-Speech. Они устанавливаются и хранятся в системе телефона и не являются частью Language Learning.</string>
+    <string name="settings_voice_language">Язык: %1$s</string>
+    <string name="settings_voice_loading">Загружаем список системных голосов…</string>
+    <string name="settings_voice_none">Для этого языка системные голоса не найдены.</string>
+    <string name="settings_voice_local">Системный голос · локальный</string>
+    <string name="settings_voice_network">Системный голос · может требовать интернет</string>
+</resources>
