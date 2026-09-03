@@ -64,6 +64,7 @@ fun ConversationScreen(
     onSendMessage: (String) -> Unit,
     onRetryEngine: () -> Unit,
     speechLanguage: SpeechLanguage = SpeechLanguages.English,
+    ttsVoiceId: String? = null,
 ) {
     var input by remember { mutableStateOf("") }
     var microphonePermissionDenied by remember { mutableStateOf(false) }
@@ -85,8 +86,8 @@ fun ConversationScreen(
         }
     }
 
-    LaunchedEffect(speechLanguage.tag) {
-        systemTts.prepare(speechLanguage)
+    LaunchedEffect(speechLanguage.tag, ttsVoiceId) {
+        systemTts.prepare(speechLanguage, ttsVoiceId)
     }
 
     LaunchedEffect(speechState.finalText) {
