@@ -27,4 +27,5 @@ include(
     ":android:core:speech",
     ":android:feature:conversation",
     ":android:feature:home",
+    ":android:feature:settings",
 )
