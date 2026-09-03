@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -17,6 +18,8 @@ data class SpeechRecognitionState(
     val isListening: Boolean = false,
     val isFinalizing: Boolean = false,
     val rmsDb: Float = 0f,
+    val levelHistory: List<Float> = emptyList(),
+    val recordingStartedAtMs: Long? = null,
     val partialText: String = "",
     val finalText: String = "",
     val errorMessage: String? = null,
@@ -35,7 +38,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         null
     }
 
-    private var lastLanguageTag: String = "en-US"
+    private var lastLanguage: SpeechLanguage = SpeechLanguages.English
 
     private val _state = MutableStateFlow(SpeechRecognitionState(isAvailable = available))
     val state: StateFlow<SpeechRecognitionState> = _state.asStateFlow()
@@ -47,11 +50,23 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             override fun onBufferReceived(buffer: ByteArray?) = Unit
 
             override fun onRmsChanged(rmsdB: Float) {
-                _state.update { it.copy(rmsDb = rmsdB) }
+                _state.update { current ->
+                    current.copy(
+                        rmsDb = rmsdB,
+                        levelHistory = (current.levelHistory + normalizeRms(rmsdB))
+                            .takeLast(MAX_LEVEL_SAMPLES),
+                    )
+                }
             }
 
             override fun onEndOfSpeech() {
-                _state.update { it.copy(isListening = false, isFinalizing = true) }
+                _state.update {
+                    it.copy(
+                        isListening = false,
+                        isFinalizing = true,
+                        recordingStartedAtMs = null,
+                    )
+                }
             }
 
             override fun onError(error: Int) {
@@ -64,6 +79,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                         isListening = false,
                         isFinalizing = false,
                         rmsDb = 0f,
+                        recordingStartedAtMs = null,
                         errorMessage = errorMessage(error),
                         languageModelDownloadRequired = languageDownloadRequired,
                         languageModelDownloadRequested = false,
@@ -78,6 +94,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                         isListening = false,
                         isFinalizing = false,
                         rmsDb = 0f,
+                        recordingStartedAtMs = null,
                         partialText = "",
                         finalText = text,
                         errorMessage = null,
@@ -95,7 +112,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         })
     }
 
-    fun startListening(languageTag: String) {
+    fun startListening(language: SpeechLanguage) {
         val activeRecognizer = recognizer
         if (activeRecognizer == null) {
             _state.update {
@@ -104,12 +121,14 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             return
         }
 
-        lastLanguageTag = languageTag
+        lastLanguage = language
         _state.update {
             it.copy(
                 isListening = true,
                 isFinalizing = false,
                 rmsDb = 0f,
+                levelHistory = emptyList(),
+                recordingStartedAtMs = SystemClock.elapsedRealtime(),
                 partialText = "",
                 finalText = "",
                 errorMessage = null,
@@ -118,17 +137,23 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             )
         }
 
-        activeRecognizer.startListening(recognitionIntent(languageTag))
+        activeRecognizer.startListening(recognitionIntent(language))
     }
 
     fun stopListening() {
         if (_state.value.isListening) {
-            _state.update { it.copy(isListening = false, isFinalizing = true) }
+            _state.update {
+                it.copy(
+                    isListening = false,
+                    isFinalizing = true,
+                    recordingStartedAtMs = null,
+                )
+            }
             recognizer?.stopListening()
         }
     }
 
-    fun requestLanguageModelDownload(languageTag: String = lastLanguageTag) {
+    fun requestLanguageModelDownload(language: SpeechLanguage = lastLanguage) {
         val activeRecognizer = recognizer
         if (activeRecognizer == null) {
             _state.update {
@@ -148,7 +173,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             return
         }
 
-        lastLanguageTag = languageTag
+        lastLanguage = language
         _state.update {
             it.copy(
                 isListening = false,
@@ -160,7 +185,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         }
 
         runCatching {
-            activeRecognizer.triggerModelDownload(recognitionIntent(languageTag))
+            activeRecognizer.triggerModelDownload(recognitionIntent(language))
         }.onFailure { error ->
             _state.update {
                 it.copy(
@@ -176,10 +201,10 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         recognizer?.destroy()
     }
 
-    private fun recognitionIntent(languageTag: String): Intent =
+    private fun recognitionIntent(language: SpeechLanguage): Intent =
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language.tag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
@@ -190,6 +215,9 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             ?.firstOrNull()
             .orEmpty()
+
+    private fun normalizeRms(rmsDb: Float): Float =
+        ((rmsDb + 2f) / 12f).coerceIn(0f, 1f)
 
     private fun errorMessage(error: Int): String = when (error) {
         SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
@@ -208,5 +236,9 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected"
         SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Too many speech recognition requests"
         else -> "Speech recognition error: $error"
+    }
+
+    private companion object {
+        const val MAX_LEVEL_SAMPLES = 48
     }
 }
