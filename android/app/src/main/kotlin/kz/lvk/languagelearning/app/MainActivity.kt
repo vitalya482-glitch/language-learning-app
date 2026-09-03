@@ -14,6 +14,7 @@ import kz.lvk.languagelearning.core.designsystem.LanguageLearningTheme
 import kz.lvk.languagelearning.feature.conversation.ConversationScreen
 import kz.lvk.languagelearning.feature.conversation.ConversationViewModel
 import kz.lvk.languagelearning.feature.home.HomeScreen
+import kz.lvk.languagelearning.feature.settings.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,34 +23,47 @@ class MainActivity : ComponentActivity() {
         val app = application as LanguageLearningApplication
         setContent {
             var showConversation by rememberSaveable { mutableStateOf(false) }
+            var showSettings by rememberSaveable { mutableStateOf(false) }
             val mainViewModel: MainViewModel = viewModel(
                 factory = MainViewModel.Factory(app.container.updateManager),
             )
             val updateState by mainViewModel.updateState.collectAsStateWithLifecycle()
 
             LanguageLearningTheme {
-                if (showConversation) {
-                    val conversationViewModel: ConversationViewModel = viewModel(
-                        factory = ConversationViewModel.Factory(app.container.languageModelEngine),
-                    )
-                    val conversationState by conversationViewModel.state.collectAsStateWithLifecycle()
+                when {
+                    showConversation -> {
+                        val conversationViewModel: ConversationViewModel = viewModel(
+                            factory = ConversationViewModel.Factory(app.container.languageModelEngine),
+                        )
+                        val conversationState by conversationViewModel.state.collectAsStateWithLifecycle()
 
-                    BackHandler { showConversation = false }
-                    ConversationScreen(
-                        state = conversationState,
-                        onBack = { showConversation = false },
-                        onSendMessage = conversationViewModel::sendMessage,
-                        onRetryEngine = conversationViewModel::loadEngine,
-                    )
-                } else {
-                    HomeScreen(
-                        versionName = BuildConfig.VERSION_NAME,
-                        versionCode = BuildConfig.VERSION_CODE.toLong(),
-                        updateState = updateState,
-                        onStartLearning = { showConversation = true },
-                        onCheckForUpdates = mainViewModel::checkForUpdates,
-                        onInstallUpdate = mainViewModel::installUpdate,
-                    )
+                        BackHandler { showConversation = false }
+                        ConversationScreen(
+                            state = conversationState,
+                            onBack = { showConversation = false },
+                            onSendMessage = conversationViewModel::sendMessage,
+                            onRetryEngine = conversationViewModel::loadEngine,
+                        )
+                    }
+
+                    showSettings -> {
+                        BackHandler { showSettings = false }
+                        SettingsScreen(
+                            onBack = { showSettings = false },
+                        )
+                    }
+
+                    else -> {
+                        HomeScreen(
+                            versionName = BuildConfig.VERSION_NAME,
+                            versionCode = BuildConfig.VERSION_CODE.toLong(),
+                            updateState = updateState,
+                            onStartLearning = { showConversation = true },
+                            onSettings = { showSettings = true },
+                            onCheckForUpdates = mainViewModel::checkForUpdates,
+                            onInstallUpdate = mainViewModel::installUpdate,
+                        )
+                    }
                 }
             }
         }
