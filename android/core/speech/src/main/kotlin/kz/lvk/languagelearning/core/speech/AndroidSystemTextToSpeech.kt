@@ -29,14 +29,11 @@ data class SystemTextToSpeechState(
 
 class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
     private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences(
-        "language_learning_system_tts",
-        Context.MODE_PRIVATE,
-    )
 
     private var engine: TextToSpeech? = null
     private var initialized = false
     private var currentLanguage: SpeechLanguage = SpeechLanguages.English
+    private var preferredVoiceId: String? = null
 
     private val _state = MutableStateFlow(SystemTextToSpeechState())
     val state: StateFlow<SystemTextToSpeechState> = _state.asStateFlow()
@@ -46,7 +43,7 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
             if (status == TextToSpeech.SUCCESS) {
                 initialized = true
                 installUtteranceListener()
-                prepare(currentLanguage)
+                prepare(currentLanguage, preferredVoiceId)
             } else {
                 _state.update {
                     it.copy(
@@ -58,8 +55,9 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
         }
     }
 
-    fun prepare(language: SpeechLanguage) {
+    fun prepare(language: SpeechLanguage, preferredVoiceId: String? = null) {
         currentLanguage = language
+        this.preferredVoiceId = preferredVoiceId
         val activeEngine = engine
         if (!initialized || activeEngine == null) {
             return
@@ -90,16 +88,13 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
                 ),
             )
 
-        val savedVoiceId = preferences.getString(preferenceKey(language), null)
-        val selectedVoice = matchingVoices.firstOrNull { it.name == savedVoiceId }
+        val selectedVoice = matchingVoices.firstOrNull { it.name == preferredVoiceId }
             ?: matchingVoices.firstOrNull { !it.isNetworkConnectionRequired }
             ?: matchingVoices.firstOrNull()
 
         if (selectedVoice != null) {
             activeEngine.voice = selectedVoice
-            if (savedVoiceId == null) {
-                saveVoice(language, selectedVoice.name)
-            }
+            this.preferredVoiceId = selectedVoice.name
         }
 
         _state.value = SystemTextToSpeechState(
@@ -126,7 +121,7 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
             ?: return
 
         activeEngine.voice = voice
-        saveVoice(language, voiceId)
+        preferredVoiceId = voiceId
         _state.update {
             it.copy(
                 selectedVoiceId = voiceId,
@@ -139,7 +134,7 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
         if (text.isBlank()) return
 
         if (language.tag != currentLanguage.tag || _state.value.languageTag != language.tag) {
-            prepare(language)
+            prepare(language, preferredVoiceId)
         }
 
         val activeEngine = engine
@@ -214,15 +209,6 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
             }
         })
     }
-
-    private fun saveVoice(language: SpeechLanguage, voiceId: String) {
-        preferences.edit()
-            .putString(preferenceKey(language), voiceId)
-            .apply()
-    }
-
-    private fun preferenceKey(language: SpeechLanguage): String =
-        "voice_${language.languageCode}"
 
     private fun toVoiceOption(voice: Voice): SystemTtsVoice {
         val localeName = voice.locale.getDisplayName(Locale.getDefault())
