@@ -2,9 +2,10 @@ package kz.lvk.languagelearning.feature.conversation
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,18 +35,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.util.Locale
+import kotlinx.coroutines.delay
 import kz.lvk.languagelearning.core.speech.AndroidOnDeviceSpeechRecognizer
+import kz.lvk.languagelearning.core.speech.SpeechLanguage
+import kz.lvk.languagelearning.core.speech.SpeechLanguages
+import kz.lvk.languagelearning.core.speech.SpeechRecognitionState
 
 @Composable
 fun ConversationScreen(
@@ -52,6 +62,7 @@ fun ConversationScreen(
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onRetryEngine: () -> Unit,
+    speechLanguage: SpeechLanguage = SpeechLanguages.English,
 ) {
     var input by remember { mutableStateOf("") }
     var microphonePermissionDenied by remember { mutableStateOf(false) }
@@ -60,6 +71,7 @@ fun ConversationScreen(
         AndroidOnDeviceSpeechRecognizer(context.applicationContext)
     }
     val speechState by speechRecognizer.state.collectAsStateWithLifecycle()
+    val speechLanguageDisplayName = speechLanguage.displayName()
 
     DisposableEffect(speechRecognizer) {
         onDispose { speechRecognizer.close() }
@@ -139,6 +151,7 @@ fun ConversationScreen(
 
             SpeechInputControl(
                 speechState = speechState,
+                languageDisplayName = speechLanguageDisplayName,
                 microphonePermissionDenied = microphonePermissionDenied,
                 onRequestPermission = {
                     microphonePermissionDenied = false
@@ -150,11 +163,11 @@ fun ConversationScreen(
                 },
                 onStartListening = {
                     microphonePermissionDenied = false
-                    speechRecognizer.startListening(languageTag = "en-US")
+                    speechRecognizer.startListening(speechLanguage)
                 },
                 onStopListening = speechRecognizer::stopListening,
                 onDownloadLanguageModel = {
-                    speechRecognizer.requestLanguageModelDownload(languageTag = "en-US")
+                    speechRecognizer.requestLanguageModelDownload(speechLanguage)
                 },
             )
 
@@ -185,7 +198,8 @@ fun ConversationScreen(
 
 @Composable
 private fun SpeechInputControl(
-    speechState: kz.lvk.languagelearning.core.speech.SpeechRecognitionState,
+    speechState: SpeechRecognitionState,
+    languageDisplayName: String,
     microphonePermissionDenied: Boolean,
     onRequestPermission: () -> Unit,
     hasMicrophonePermission: () -> Boolean,
@@ -193,6 +207,20 @@ private fun SpeechInputControl(
     onStopListening: () -> Unit,
     onDownloadLanguageModel: () -> Unit,
 ) {
+    var recordingElapsedMs by remember { mutableLongStateOf(0L) }
+
+    LaunchedEffect(speechState.isListening, speechState.recordingStartedAtMs) {
+        val startedAt = speechState.recordingStartedAtMs
+        if (speechState.isListening && startedAt != null) {
+            while (true) {
+                recordingElapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+                delay(100)
+            }
+        } else {
+            recordingElapsedMs = 0L
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -244,7 +272,7 @@ private fun SpeechInputControl(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(104.dp),
+                .height(122.dp),
             contentAlignment = Alignment.Center,
         ) {
             val speechError = speechState.errorMessage
@@ -264,10 +292,27 @@ private fun SpeechInputControl(
                 )
 
                 speechState.isListening -> Column(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    VoiceLevelTrack(speechState.rmsDb)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SpeechWaveform(
+                            levels = speechState.levelHistory,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp),
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Text(
+                            text = formatRecordingDuration(recordingElapsedMs),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
                     if (speechState.partialText.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             text = speechState.partialText,
                             style = MaterialTheme.typography.bodySmall,
@@ -291,19 +336,30 @@ private fun SpeechInputControl(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = stringResource(R.string.speech_language_model_missing),
+                        text = stringResource(
+                            R.string.speech_language_model_missing,
+                            languageDisplayName,
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = onDownloadLanguageModel) {
-                        Text(stringResource(R.string.speech_download_language_model))
+                        Text(
+                            stringResource(
+                                R.string.speech_download_language_model,
+                                languageDisplayName,
+                            ),
+                        )
                     }
                 }
 
                 speechState.languageModelDownloadRequested -> Text(
-                    text = stringResource(R.string.speech_language_model_download_requested),
+                    text = stringResource(
+                        R.string.speech_language_model_download_requested,
+                        languageDisplayName,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -327,24 +383,46 @@ private fun SpeechInputControl(
 }
 
 @Composable
-private fun VoiceLevelTrack(rmsDb: Float) {
-    val level = ((rmsDb + 2f) / 12f).coerceIn(0f, 1f)
-    val multipliers = listOf(0.45f, 0.75f, 1f, 0.65f, 0.9f, 0.55f, 0.8f, 0.5f, 0.7f)
+private fun SpeechWaveform(
+    levels: List<Float>,
+    modifier: Modifier = Modifier,
+) {
+    val waveformColor = MaterialTheme.colorScheme.primary
+    val barCount = 48
 
-    Row(
-        modifier = Modifier.height(28.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        multipliers.forEach { multiplier ->
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .height((6f + 20f * level * multiplier).dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+    Canvas(modifier = modifier) {
+        val samples = if (levels.size >= barCount) {
+            levels.takeLast(barCount)
+        } else {
+            List(barCount - levels.size) { 0f } + levels
+        }
+
+        val slotWidth = size.width / barCount
+        val strokeWidth = (slotWidth * 0.42f).coerceAtLeast(2.dp.toPx())
+        val minimumHeight = 4.dp.toPx()
+        val centerY = size.height / 2f
+
+        samples.forEachIndexed { index, level ->
+            val barHeight = (minimumHeight + (size.height - minimumHeight) * level)
+                .coerceIn(minimumHeight, size.height)
+            val x = slotWidth * index + slotWidth / 2f
+
+            drawLine(
+                color = waveformColor,
+                start = Offset(x, centerY - barHeight / 2f),
+                end = Offset(x, centerY + barHeight / 2f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
             )
         }
     }
+}
+
+private fun formatRecordingDuration(elapsedMs: Long): String {
+    val totalSeconds = elapsedMs / 1_000L
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return String.format(Locale.US, "%02d:%02d", minutes, seconds)
 }
 
 @Composable
