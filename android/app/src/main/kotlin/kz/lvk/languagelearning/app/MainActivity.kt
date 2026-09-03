@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kz.lvk.languagelearning.core.designsystem.LanguageLearningTheme
+import kz.lvk.languagelearning.core.speech.SpeechLanguage
 import kz.lvk.languagelearning.feature.conversation.ConversationScreen
 import kz.lvk.languagelearning.feature.conversation.ConversationViewModel
 import kz.lvk.languagelearning.feature.home.HomeScreen
@@ -28,6 +29,8 @@ class MainActivity : ComponentActivity() {
                 factory = MainViewModel.Factory(app.container.updateManager),
             )
             val updateState by mainViewModel.updateState.collectAsStateWithLifecycle()
+            val appSettings by app.container.settingsRepository.settings.collectAsStateWithLifecycle()
+            val targetSpeechLanguage = SpeechLanguage(appSettings.targetLanguageTag)
 
             LanguageLearningTheme {
                 when {
@@ -43,13 +46,20 @@ class MainActivity : ComponentActivity() {
                             onBack = { showConversation = false },
                             onSendMessage = conversationViewModel::sendMessage,
                             onRetryEngine = conversationViewModel::loadEngine,
+                            speechLanguage = targetSpeechLanguage,
+                            ttsVoiceId = appSettings.targetVoiceId,
                         )
                     }
 
                     showSettings -> {
                         BackHandler { showSettings = false }
                         SettingsScreen(
+                            appSettings = appSettings,
                             onBack = { showSettings = false },
+                            onNativeLanguageChange = app.container.settingsRepository::setNativeLanguage,
+                            onTargetLanguageChange = app.container.settingsRepository::setTargetLanguage,
+                            onLearningLevelChange = app.container.settingsRepository::setLearningLevel,
+                            onTtsVoiceChange = app.container.settingsRepository::setTtsVoice,
                         )
                     }
 
