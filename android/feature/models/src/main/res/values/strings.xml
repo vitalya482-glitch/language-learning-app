@@ -1,0 +1,18 @@
+<resources>
+    <string name="models_title">Local models</string>
+    <string name="models_back">Back</string>
+    <string name="models_note">Models are downloaded separately from the APK and stored only on this device.</string>
+    <string name="models_free_space">Free space for models: %1$s</string>
+    <string name="models_recommended_name">Recommended · %1$s</string>
+    <string name="models_metadata">≈ %1$s · %2$s · %3$s</string>
+    <string name="models_not_installed">Not installed</string>
+    <string name="models_download">Download model</string>
+    <string name="models_downloading">Downloading: %1$s · %2$s / %3$s</string>
+    <string name="models_verifying">Download complete. Verifying SHA-256…</string>
+    <string name="models_cancel_delete">Cancel and delete</string>
+    <string name="models_installed">Installed · %1$s</string>
+    <string name="models_inference_next">The model file is ready. Connecting it to the native inference engine is the next step.</string>
+    <string name="models_delete">Delete model</string>
+    <string name="models_retry">Try again</string>
+    <string name="models_delete_partial">Delete partial file</string>
+</resources>
