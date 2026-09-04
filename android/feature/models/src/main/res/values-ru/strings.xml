@@ -1,0 +1,18 @@
+<resources>
+    <string name="models_title">Локальные модели</string>
+    <string name="models_back">Назад</string>
+    <string name="models_note">Модели скачиваются отдельно от APK и хранятся только на этом устройстве.</string>
+    <string name="models_free_space">Свободно для моделей: %1$s</string>
+    <string name="models_recommended_name">Рекомендуемая · %1$s</string>
+    <string name="models_metadata">≈ %1$s · %2$s · %3$s</string>
+    <string name="models_not_installed">Не установлена</string>
+    <string name="models_download">Скачать модель</string>
+    <string name="models_downloading">Скачивание: %1$s · %2$s / %3$s</string>
+    <string name="models_verifying">Загрузка завершена. Проверяем SHA-256…</string>
+    <string name="models_cancel_delete">Отменить и удалить</string>
+    <string name="models_installed">Установлена · %1$s</string>
+    <string name="models_inference_next">Файл модели готов. Подключение к нативному inference-движку — следующий этап.</string>
+    <string name="models_delete">Удалить модель</string>
+    <string name="models_retry">Повторить</string>
+    <string name="models_delete_partial">Удалить недокачанный файл</string>
+</resources>
