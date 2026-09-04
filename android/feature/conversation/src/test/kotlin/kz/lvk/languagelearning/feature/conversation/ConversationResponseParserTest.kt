@@ -2,6 +2,7 @@ package kz.lvk.languagelearning.feature.conversation
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationResponseParserTest {
@@ -160,5 +161,31 @@ class ConversationResponseParserTest {
         assertEquals(true, "Фраза построена правильно.".matchesExpectedLanguageScript("ru-RU"))
         assertFalse("The phrase is correct.".matchesExpectedLanguageScript("ru-RU"))
         assertEquals(true, "The phrase is correct.".matchesExpectedLanguageScript("en-US"))
+    }
+
+    @Test
+    fun `parses an ok verdict without exposing the protocol`() {
+        val result = parseLanguageAnalysis(
+            "VERDICT: OK\nФраза понятна и естественно звучит в разговоре.",
+        )
+
+        assertFalse(result.needsCorrection ?: true)
+        assertEquals("Фраза понятна и естественно звучит в разговоре.", result.text)
+    }
+
+    @Test
+    fun `parses a correction verdict`() {
+        val result = parseLanguageAnalysis(
+            "VERDICT: NEEDS_CORRECTION\nUse 'a distribution company' here.",
+        )
+
+        assertTrue(result.needsCorrection ?: false)
+        assertEquals("Use 'a distribution company' here.", result.text)
+    }
+
+    @Test
+    fun `ignores punctuation-only natural phrase changes`() {
+        assertFalse("Hello, where are you?".isMeaningfullyDifferentFrom("Hello where are you"))
+        assertTrue("I'm here".isMeaningfullyDifferentFrom("Im here"))
     }
 }

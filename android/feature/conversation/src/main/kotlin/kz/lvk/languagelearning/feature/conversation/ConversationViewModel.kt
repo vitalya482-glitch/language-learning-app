@@ -40,10 +40,13 @@ class ConversationViewModel(
         You are a $targetLanguageName teacher. The learner's native language is
         $nativeLanguageName and their level is $learningLevel. Analyze only the text marked
         CURRENT LEARNER PHRASE. Explain its meaning and the most important grammar or word-choice
-        issue. If it is correct, say so briefly. Your entire final answer must be 1-2 short
-        sentences in $explanationLanguageName ($explanationLanguageTag). Do not continue the
-        conversation, invent an intention, add a corrected example, use a list, Markdown, a
-        heading, generic praise, or text from an earlier turn.
+        issue in $targetLanguageName only; never analyze it as $nativeLanguageName. Treat missing
+        punctuation, capitalization, and harmless spoken-language brevity as correct. The first
+        line must be exactly VERDICT: OK when the phrase is understandable and natural enough, or
+        VERDICT: NEEDS_CORRECTION when a real wording or grammar correction is useful. After that,
+        write 1-2 short sentences in $explanationLanguageName ($explanationLanguageTag). Do not
+        continue the conversation, invent an intention, add a corrected example, use a list,
+        Markdown, generic praise, or text from an earlier turn.
     """.trimIndent()
 
     private val naturalPhraseSystemPrompt = """
@@ -58,8 +61,10 @@ class ConversationViewModel(
         You are a friendly $targetLanguageName conversation partner. Respond directly to the text
         marked CURRENT LEARNER PHRASE in 1-3 concise sentences in $targetLanguageName
         ($targetLanguageTag), then ask one specific question that naturally continues its topic.
-        The recent dialogue is context only. Never repeat an earlier answer, ask how you can help,
-        ask the learner to provide context, give generic praise, or discuss an older topic. If the
+        Answer the learner's literal question before asking your question. The recent dialogue is
+        context only. Never say that you understand the context, repeat an earlier answer, ask how
+        you can help, ask the learner to provide more details when a direct answer is possible,
+        give generic praise, or discuss an older topic. If the
         learner asks you to assess their language level, start the assessment with a concrete
         open-ended question instead of asking what they want to assess. Do not repeat the language
         analysis or use headings, tags, lists, or Markdown.
@@ -139,7 +144,7 @@ class ConversationViewModel(
             runCatching {
                 val conversationHistory = buildConversationHistory(currentState.messages)
                 val analysisInput = buildAnalysisInput(conversationHistory, userText)
-                val analysis = try {
+                val rawAnalysis = try {
                     generateStageWithRetry(
                         LanguageModelRequest(
                             systemPrompt = analysisSystemPrompt,
@@ -149,18 +154,28 @@ class ConversationViewModel(
                         ),
                         acceptLastNonEmptyAfterRetries = true,
                         isAcceptable = { candidate ->
-                            candidate.matchesExpectedLanguageScript(explanationLanguageTag)
+                            parseLanguageAnalysis(candidate).text
+                                .matchesExpectedLanguageScript(explanationLanguageTag)
                         },
                     )
                 } catch (_: NoUsableModelStageException) {
                     unavailableAnalysisText(explanationLanguageTag)
+                }
+                val parsedAnalysis = parseLanguageAnalysis(rawAnalysis)
+                val analysis = parsedAnalysis.text.ifBlank {
+                    analysisVerdictFallback(
+                        needsCorrection = parsedAnalysis.needsCorrection,
+                        languageTag = explanationLanguageTag,
+                    )
                 }
 
                 _state.update {
                     it.copy(generationPhase = ConversationGenerationPhase.Composing)
                 }
 
-                val naturalPhrase = if (includeNaturalPhrase) {
+                val naturalPhrase = if (
+                    includeNaturalPhrase && parsedAnalysis.needsCorrection != false
+                ) {
                     try {
                         generateStageWithRetry(
                             LanguageModelRequest(
@@ -177,8 +192,11 @@ class ConversationViewModel(
                                     cleaned.matchesExpectedLanguageScript(targetLanguageTag)
                             },
                         ).cleanNaturalPhrase()
+                            .takeIf { candidate ->
+                                candidate.isMeaningfullyDifferentFrom(userText)
+                            }
                     } catch (_: NoUsableModelStageException) {
-                        userText
+                        null
                     }
                 } else {
                     null
@@ -334,6 +352,11 @@ private class NoUsableModelStageException(
     cause: Throwable?,
 ) : IllegalStateException(message, cause)
 
+internal data class ParsedLanguageAnalysis(
+    val text: String,
+    val needsCorrection: Boolean?,
+)
+
 private val anySpeakMarkerRegex = Regex(
     pattern = """(?i)\[\s*\[\s*/?\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
 )
@@ -405,6 +428,44 @@ private val naturalPhraseLabelRegex = Regex(
 private fun String.cleanNaturalPhrase(): String =
     replace(naturalPhraseLabelRegex, "")
         .cleanGenerationStage()
+
+private val analysisVerdictRegex = Regex(
+    pattern = """(?i)^\s*(?:verdict|status)\s*:\s*(ok|correct|fix|needs[_ -]?correction)\b\s*[.—:;-]?\s*(.*)$""",
+)
+
+internal fun parseLanguageAnalysis(rawText: String): ParsedLanguageAnalysis {
+    val lines = rawText.cleanGenerationStage().lines().toMutableList()
+    val verdictIndex = lines.indexOfFirst { analysisVerdictRegex.matches(it) }
+    if (verdictIndex < 0) {
+        return ParsedLanguageAnalysis(
+            text = lines.joinToString("\n").trimForTutorOutput(),
+            needsCorrection = null,
+        )
+    }
+
+    val match = analysisVerdictRegex.matchEntire(lines[verdictIndex])
+        ?: return ParsedLanguageAnalysis(rawText.cleanGenerationStage(), null)
+    val verdict = match.groupValues[1].lowercase().replace(Regex("[_ -]"), "")
+    val remainder = match.groupValues[2].trim()
+    lines.removeAt(verdictIndex)
+    if (remainder.isNotEmpty()) {
+        lines.add(verdictIndex, remainder)
+    }
+    return ParsedLanguageAnalysis(
+        text = lines.joinToString("\n").trimForTutorOutput(),
+        needsCorrection = verdict != "ok" && verdict != "correct",
+    )
+}
+
+internal fun String.isMeaningfullyDifferentFrom(original: String): Boolean {
+    fun String.forCorrectionComparison(): String =
+        lowercase()
+            .replace('’', '\'')
+            .replace(Regex("[\\s,.!?;:…]+"), " ")
+            .trim()
+
+    return forCorrectionComparison() != original.forCorrectionComparison()
+}
 
 private fun String.isKnownBoilerplateResponse(): Boolean {
     val normalized = lowercase()
@@ -492,6 +553,20 @@ private fun unavailableAnalysisText(languageTag: String): String =
         "kk" -> "Толық талдау қолжетімсіз болды, бірақ әңгімені жалғастыра аламыз."
         "zh" -> "暂时无法获得详细分析，但我们可以继续对话。"
         else -> "The detailed analysis was unavailable, but we can continue."
+    }
+
+private fun analysisVerdictFallback(needsCorrection: Boolean?, languageTag: String): String =
+    when (languageTag.substringBefore('-').lowercase()) {
+        "ru" -> if (needsCorrection == false) {
+            "Фраза звучит естественно и понятна."
+        } else {
+            "Фразу стоит немного исправить."
+        }
+        else -> if (needsCorrection == false) {
+            "The phrase sounds natural and clear."
+        } else {
+            "This phrase would benefit from a small correction."
+        }
     }
 
 private fun fallbackConversationReply(languageTag: String): String =
