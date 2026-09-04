@@ -11,6 +11,8 @@
     <string name="conversation_retry">Retry</string>
     <string name="conversation_error">Local AI error: %1$s</string>
     <string name="conversation_generating">AI is responding… %1$s</string>
+    <string name="conversation_analyzing">AI is analyzing your phrase… %1$s</string>
+    <string name="conversation_composing">AI is composing the complete reply… %1$s</string>
     <string name="conversation_view_dialog">View dialog</string>
     <string name="conversation_dialog_title">Conversation</string>
     <string name="conversation_close_dialog">Close</string>

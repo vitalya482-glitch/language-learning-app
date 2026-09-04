@@ -92,7 +92,9 @@ Java_kz_lvk_languagelearning_core_ai_nativeengine_NativeLanguageModelEngine_nati
     jobject,
     jlong handle,
     jstring system_prompt,
-    jstring user_text
+    jstring user_text,
+    jboolean thinking_enabled,
+    jint max_output_tokens
 ) {
     try {
         NativeAiEngine* engine = engine_from(handle);
@@ -101,7 +103,9 @@ Java_kz_lvk_languagelearning_core_ai_nativeengine_NativeLanguageModelEngine_nati
         }
         const std::string response = engine->generate(
             to_string(env, system_prompt),
-            to_string(env, user_text)
+            to_string(env, user_text),
+            thinking_enabled == JNI_TRUE,
+            static_cast<int32_t>(max_output_tokens)
         );
         return env->NewStringUTF(response.c_str());
     } catch (const std::invalid_argument& error) {

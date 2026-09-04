@@ -14,11 +14,11 @@ class ConversationResponseParserTest {
             """.trimIndent(),
         )
 
-        assertEquals("I'm doing well, thank you. How are you?", result.spokenText)
         assertEquals(
-            "Фраза правильная.\n\nI'm doing well, thank you. How are you?",
+            "I'm doing well, thank you. How are you?\nФраза правильная.",
             result.visibleText,
         )
+        assertEquals(result.visibleText, result.spokenText)
     }
 
     @Test
@@ -45,17 +45,36 @@ class ConversationResponseParserTest {
             "[[SPEAK]]Hello![[/SPEAK]]\nCorrected: Hello, my friend.",
         )
 
-        assertEquals("Hello!", result.spokenText)
-        assertEquals("Corrected: Hello, my friend.\n\nHello!", result.visibleText)
+        assertEquals("Hello!\nCorrected: Hello, my friend.", result.visibleText)
+        assertEquals(result.visibleText, result.spokenText)
     }
 
     @Test
-    fun `uses first line for speech without duplicating a natural response`() {
+    fun `speaks the complete natural response`() {
         val raw = "I'm doing well, thank you!\nФраза правильная."
 
         val result = parseTutorResponse(raw)
 
-        assertEquals("I'm doing well, thank you!", result.spokenText)
         assertEquals(raw, result.visibleText)
+        assertEquals(raw, result.spokenText)
+    }
+
+    @Test
+    fun `composes and speaks both analysis and reply`() {
+        val result = composeTutorResponse(
+            analysis = "A natural version is: Do you know the band Guns N' Roses?",
+            reply = "Yes. They are an American rock band. What is your favorite song?",
+        )
+
+        assertEquals(
+            "Analysis: A natural version is: Do you know the band Guns N' Roses?\n\n" +
+                "Reply: Yes. They are an American rock band. What is your favorite song?",
+            result.visibleText,
+        )
+        assertEquals(
+            "A natural version is: Do you know the band Guns N' Roses?\n\n" +
+                "Yes. They are an American rock band. What is your favorite song?",
+            result.spokenText,
+        )
     }
 }

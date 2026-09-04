@@ -278,9 +278,9 @@ fun ConversationScreen(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(22.dp))
                             Text(
-                                text = stringResource(
-                                    R.string.conversation_generating,
-                                    formatRecordingDuration(generationElapsedMs),
+                                text = generationStatusText(
+                                    state.generationPhase,
+                                    generationElapsedMs,
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -438,6 +438,7 @@ fun ConversationScreen(
         ConversationViewerDialog(
             messages = state.messages,
             isGenerating = state.isGenerating,
+            generationPhase = state.generationPhase,
             generationElapsedMs = generationElapsedMs,
             onDismiss = { showConversationViewer = false },
         )
@@ -835,6 +836,19 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
     return String.format(Locale.US, "%02d:%02d", minutes, seconds)
 }
 
+@Composable
+private fun generationStatusText(
+    phase: ConversationGenerationPhase?,
+    elapsedMs: Long,
+): String {
+    val resourceId = when (phase) {
+        ConversationGenerationPhase.Analyzing -> R.string.conversation_analyzing
+        ConversationGenerationPhase.Composing -> R.string.conversation_composing
+        null -> R.string.conversation_generating
+    }
+    return stringResource(resourceId, formatRecordingDuration(elapsedMs))
+}
+
 private const val FLOW_RESTART_DELAY_MS = 350L
 private const val FLOW_RETRY_DELAY_MS = 700L
 
@@ -842,6 +856,7 @@ private const val FLOW_RETRY_DELAY_MS = 700L
 private fun ConversationViewerDialog(
     messages: List<ConversationMessage>,
     isGenerating: Boolean,
+    generationPhase: ConversationGenerationPhase?,
     generationElapsedMs: Long,
     onDismiss: () -> Unit,
 ) {
@@ -899,9 +914,9 @@ private fun ConversationViewerDialog(
                             ) {
                                 CircularProgressIndicator(modifier = Modifier.size(22.dp))
                                 Text(
-                                    text = stringResource(
-                                        R.string.conversation_generating,
-                                        formatRecordingDuration(generationElapsedMs),
+                                    text = generationStatusText(
+                                        generationPhase,
+                                        generationElapsedMs,
                                     ),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,

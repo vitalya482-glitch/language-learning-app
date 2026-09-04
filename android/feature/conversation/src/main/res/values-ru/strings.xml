@@ -11,6 +11,8 @@
     <string name="conversation_retry">Повторить</string>
     <string name="conversation_error">Ошибка локального AI: %1$s</string>
     <string name="conversation_generating">AI отвечает… %1$s</string>
+    <string name="conversation_analyzing">AI обдумывает вашу фразу… %1$s</string>
+    <string name="conversation_composing">AI составляет полный ответ… %1$s</string>
     <string name="conversation_view_dialog">Посмотреть диалог</string>
     <string name="conversation_dialog_title">Диалог</string>
     <string name="conversation_close_dialog">Закрыть</string>

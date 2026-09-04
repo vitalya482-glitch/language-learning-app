@@ -26,7 +26,9 @@ public:
     void load(ModelDescriptor model);
     [[nodiscard]] std::string generate(
         const std::string& system_prompt,
-        const std::string& user_text
+        const std::string& user_text,
+        bool thinking_enabled = false,
+        int32_t max_output_tokens = 160
     );
     void unload() noexcept;
 

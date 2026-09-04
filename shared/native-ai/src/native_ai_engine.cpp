@@ -3,7 +3,6 @@
 #include "llama.h"
 
 #include <algorithm>
-#include <chrono>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -16,8 +15,8 @@ namespace lvk::language_learning {
 namespace {
 
 constexpr int32_t kContextTokens = 2048;
-constexpr int32_t kMaxGeneratedTokens = 96;
-constexpr auto kMaxGenerationTime = std::chrono::seconds(25);
+constexpr int32_t kMinGeneratedTokens = 32;
+constexpr int32_t kMaxGeneratedTokens = 512;
 
 int32_t inference_threads() {
     const unsigned int available = std::thread::hardware_concurrency();
@@ -47,13 +46,19 @@ std::string trim_copy(std::string value) {
 }
 
 std::string remove_qwen_thinking(std::string value) {
+    const std::string opening = "<think>";
     const std::string closing = "</think>";
+    const auto open_pos = value.find(opening);
     const auto close_pos = value.find(closing);
+    if (open_pos != std::string::npos && close_pos == std::string::npos) {
+        // Never pass a truncated internal reasoning trace to the application. Returning an empty
+        // result makes the conversation orchestrator retry this stage with a fresh sample.
+        return {};
+    }
     if (close_pos != std::string::npos) {
         value = value.substr(close_pos + closing.size());
     }
 
-    const std::string opening = "<think>";
     if (value.rfind(opening, 0) == 0) {
         value.erase(0, opening.size());
     }
@@ -64,13 +69,16 @@ std::string remove_qwen_thinking(std::string value) {
 std::string format_chat_prompt(
     const llama_model* model,
     const std::string& system_prompt,
-    const std::string& user_text
+    const std::string& user_text,
+    bool thinking_enabled
 ) {
     const std::string effective_system = system_prompt.empty()
         ? "You are a concise language tutor."
         : system_prompt;
 
-    const std::string effective_user = user_text + "\n/no_think";
+    const std::string effective_user = user_text + (
+        thinking_enabled ? "\n/think" : "\n/no_think"
+    );
 
     const llama_chat_message messages[] = {
         {"system", effective_system.c_str()},
@@ -218,7 +226,9 @@ void NativeAiEngine::load(ModelDescriptor model) {
 
 std::string NativeAiEngine::generate(
     const std::string& system_prompt,
-    const std::string& user_text
+    const std::string& user_text,
+    bool thinking_enabled,
+    int32_t max_output_tokens
 ) {
     if (model_handle_ == nullptr || context_handle_ == nullptr) {
         throw std::logic_error("A model must be loaded before generation");
@@ -226,18 +236,27 @@ std::string NativeAiEngine::generate(
     if (trim_copy(user_text).empty()) {
         throw std::invalid_argument("User text must not be empty");
     }
+    if (max_output_tokens < kMinGeneratedTokens || max_output_tokens > kMaxGeneratedTokens) {
+        throw std::invalid_argument("Requested output token count must be between 32 and 512");
+    }
 
     const llama_vocab* vocab = llama_model_get_vocab(model_handle_);
     if (vocab == nullptr) {
         throw std::runtime_error("The loaded model has no vocabulary");
     }
 
-    const std::string prompt = format_chat_prompt(model_handle_, system_prompt, user_text);
+    const std::string prompt = format_chat_prompt(
+        model_handle_,
+        system_prompt,
+        user_text,
+        thinking_enabled
+    );
     std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt, true);
     if (prompt_tokens.empty()) {
         throw std::runtime_error("The model prompt produced no tokens");
     }
-    if (prompt_tokens.size() + kMaxGeneratedTokens >= static_cast<size_t>(kContextTokens)) {
+    if (prompt_tokens.size() + static_cast<size_t>(max_output_tokens) >=
+        static_cast<size_t>(kContextTokens)) {
         throw std::invalid_argument("The prompt is too long for the mobile inference context");
     }
 
@@ -282,9 +301,13 @@ std::string NativeAiEngine::generate(
     if (!sampler) {
         throw std::runtime_error("llama.cpp could not create a sampler");
     }
+    llama_sampler_chain_add(
+        sampler.get(),
+        llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, 1.10f, 0.05f, 0.0f)
+    );
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_min_p(0.05f, 1));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(0.25f));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(42));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(0.55f));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
     llama_batch batch = llama_batch_get_one(
         prompt_tokens.data() + reusable_prefix,
@@ -294,15 +317,8 @@ std::string NativeAiEngine::generate(
     std::string response;
     response.reserve(1024);
     llama_token generated_token = LLAMA_TOKEN_NULL;
-    const auto started_at = std::chrono::steady_clock::now();
-    bool timed_out = false;
 
-    for (int32_t generated = 0; generated < kMaxGeneratedTokens; ++generated) {
-        if (std::chrono::steady_clock::now() - started_at >= kMaxGenerationTime) {
-            timed_out = true;
-            break;
-        }
-
+    for (int32_t generated = 0; generated < max_output_tokens; ++generated) {
         const int32_t decode_result = llama_decode(context_handle_, batch);
         if (decode_result != 0) {
             cached_prompt_tokens_.clear();
@@ -326,9 +342,6 @@ std::string NativeAiEngine::generate(
 
     response = remove_qwen_thinking(std::move(response));
     if (response.empty()) {
-        if (timed_out) {
-            throw std::runtime_error("Local generation exceeded the 25 second mobile limit");
-        }
         throw std::runtime_error("The local model generated an empty response");
     }
 

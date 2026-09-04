@@ -20,6 +20,8 @@ data class LocalModelDescriptor(
 data class LanguageModelRequest(
     val systemPrompt: String,
     val userText: String,
+    val thinkingEnabled: Boolean = false,
+    val maxOutputTokens: Int = 160,
 )
 
 data class LanguageModelResponse(

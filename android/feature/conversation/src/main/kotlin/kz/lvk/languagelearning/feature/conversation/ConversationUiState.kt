@@ -3,6 +3,7 @@ package kz.lvk.languagelearning.feature.conversation
 data class ConversationUiState(
     val isEngineReady: Boolean = false,
     val isGenerating: Boolean = false,
+    val generationPhase: ConversationGenerationPhase? = null,
     val messages: List<ConversationMessage> = emptyList(),
     val errorMessage: String? = null,
 )
@@ -17,4 +18,9 @@ data class ConversationMessage(
 enum class ConversationRole {
     User,
     Assistant,
+}
+
+enum class ConversationGenerationPhase {
+    Analyzing,
+    Composing,
 }

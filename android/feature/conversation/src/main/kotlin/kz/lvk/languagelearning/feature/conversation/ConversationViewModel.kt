@@ -3,6 +3,7 @@ package kz.lvk.languagelearning.feature.conversation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,13 +25,23 @@ class ConversationViewModel(
 
     private var nextMessageId = 0L
 
-    private val tutorSystemPrompt = """
-        You are a friendly language tutor. The learner speaks $nativeLanguageTag and studies
-        $targetLanguageTag at CEFR level $learningLevel. First answer the learner directly in one
-        short, natural sentence in $targetLanguageTag. Never repeat the learner's question as your
-        answer. On the next line, briefly praise or correct the learner in $nativeLanguageTag.
-        If there is a mistake, show the correct $targetLanguageTag phrase. Use no headings, tags,
-        quotes, Markdown, or hidden reasoning. Keep everything under 45 words.
+    private val analysisSystemPrompt = """
+        You are the careful analysis stage of a language tutor. The learner speaks
+        $nativeLanguageTag and studies $targetLanguageTag at CEFR level $learningLevel. Focus on
+        the CURRENT learner message, while using recent conversation only as context. Identify its
+        exact meaning and topic, then explain any grammar or word-choice issue and give a natural
+        corrected phrase. If it is already natural, say so. Write 1-3 concise learner-facing
+        sentences in simple $targetLanguageTag. Do not answer the learner yet. Do not give generic
+        praise, repeat an earlier topic, use headings, or expose hidden reasoning.
+    """.trimIndent()
+
+    private val replySystemPrompt = """
+        You are the response stage of a friendly language tutor. The learner speaks
+        $nativeLanguageTag and studies $targetLanguageTag at CEFR level $learningLevel. Use the
+        supplied analysis to answer the CURRENT learner message directly. Write 2-4 natural,
+        specific sentences in $targetLanguageTag and finish with one relevant question that keeps
+        the same topic moving. Never fall back to generic praise, offers to start, or a topic from
+        an earlier turn. Do not repeat the analysis, use headings, tags, or hidden reasoning.
     """.trimIndent()
 
     init {
@@ -77,20 +88,45 @@ class ConversationViewModel(
             it.copy(
                 messages = it.messages + userMessage,
                 isGenerating = true,
+                generationPhase = ConversationGenerationPhase.Analyzing,
                 errorMessage = null,
             )
         }
 
         viewModelScope.launch {
             runCatching {
-                engine.generate(
+                val conversationInput = buildModelInput(currentState.messages, userText)
+                val analysis = generateStageWithRetry(
                     LanguageModelRequest(
-                        systemPrompt = tutorSystemPrompt,
-                        userText = buildModelInput(currentState.messages, userText),
+                        systemPrompt = analysisSystemPrompt,
+                        userText = conversationInput,
+                        thinkingEnabled = true,
+                        maxOutputTokens = ANALYSIS_MAX_OUTPUT_TOKENS,
                     ),
                 )
-            }.onSuccess { response ->
-                val parsedResponse = parseTutorResponse(response.text)
+
+                _state.update {
+                    it.copy(generationPhase = ConversationGenerationPhase.Composing)
+                }
+
+                val reply = generateStageWithRetry(
+                    LanguageModelRequest(
+                        systemPrompt = replySystemPrompt,
+                        userText = """
+                            Conversation and current learner message:
+                            $conversationInput
+
+                            Completed language analysis:
+                            $analysis
+                        """.trimIndent(),
+                        thinkingEnabled = false,
+                        maxOutputTokens = REPLY_MAX_OUTPUT_TOKENS,
+                    ),
+                    rejectBoilerplate = true,
+                )
+
+                composeTutorResponse(analysis, reply)
+            }.onSuccess { parsedResponse ->
                 val assistantMessage = ConversationMessage(
                     id = nextMessageId++,
                     text = parsedResponse.visibleText,
@@ -101,17 +137,50 @@ class ConversationViewModel(
                     it.copy(
                         messages = it.messages + assistantMessage,
                         isGenerating = false,
+                        generationPhase = null,
                     )
                 }
             }.onFailure { error ->
                 _state.update {
                     it.copy(
                         isGenerating = false,
+                        generationPhase = null,
                         errorMessage = error.message ?: "Local AI generation failed",
                     )
                 }
             }
         }
+    }
+
+    private suspend fun generateStageWithRetry(
+        request: LanguageModelRequest,
+        rejectBoilerplate: Boolean = false,
+    ): String {
+        var lastFailure: Throwable? = null
+
+        repeat(MAX_GENERATION_ATTEMPTS) {
+            try {
+                val text = engine.generate(request).text.cleanGenerationStage()
+                if (
+                    text.length >= MIN_USABLE_STAGE_LENGTH &&
+                    (!rejectBoilerplate || !text.isKnownBoilerplateResponse())
+                ) {
+                    return text
+                }
+                lastFailure = IllegalStateException("The local model returned an incomplete answer")
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                val emptyResponse = error.message
+                    ?.contains("empty response", ignoreCase = true) == true
+                if (!emptyResponse) throw error
+                lastFailure = error
+            }
+        }
+
+        throw IllegalStateException(
+            "The local model did not return a usable answer after $MAX_GENERATION_ATTEMPTS attempts",
+            lastFailure,
+        )
     }
 
     class Factory(
@@ -142,76 +211,76 @@ internal data class ParsedTutorResponse(
     val spokenText: String?,
 )
 
-private val speakOpenMarkerRegex = Regex(
-    pattern = """(?i)\[\s*\[\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
-)
-
-private val speakCloseMarkerRegex = Regex(
-    pattern = """(?i)\[\s*\[\s*/\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
-)
-
 private val anySpeakMarkerRegex = Regex(
     pattern = """(?i)\[\s*\[\s*/?\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
 )
 
-private val spokenLineRegex = Regex(
-    pattern = """(?im)^\s*(?:say|speak|short\s+reply|spoken\s+reply|reply)\s*:\s*[\"“]?(.+?)[\"”]?\s*$""",
+private val legacySpokenLineRegex = Regex(
+    pattern = """(?im)^\s*(?:say|speak|short\s+reply|spoken\s+reply)\s*:\s*[\"“]?(.+?)[\"”]?\s*$""",
 )
 
 private val feedbackLabelRegex = Regex(
     pattern = """(?im)^\s*(?:feedback|correction|explanation)\s*:\s*""",
 )
 
+private val spokenSectionLabelRegex = Regex(
+    pattern = """(?im)^\s*(?:analysis|reply)\s*:\s*""",
+)
+
 internal fun parseTutorResponse(rawText: String): ParsedTutorResponse {
-    val openMarker = speakOpenMarkerRegex.find(rawText)
-    val closeMarker = openMarker?.let {
-        speakCloseMarkerRegex.find(rawText, it.range.last + 1)
-    }
-    val taggedSpokenText = openMarker?.let { open ->
-        val contentStart = open.range.last + 1
-        val contentEnd = closeMarker?.range?.first
-            ?: rawText.indexOf('\n', contentStart).takeIf { it >= 0 }
-            ?: rawText.length
-        rawText.substring(contentStart, contentEnd)
-            .trimForTutorOutput()
-            .takeIf { it.isNotBlank() }
-    }
-
-    val labelledSpokenText = spokenLineRegex
-        .find(rawText)
-        ?.groupValues
-        ?.getOrNull(1)
-        ?.trimForTutorOutput()
-        ?.takeIf { it.isNotBlank() }
-
-    val withoutTaggedBlock = if (openMarker != null && closeMarker != null) {
-        rawText.removeRange(openMarker.range.first, closeMarker.range.last + 1)
-    } else {
-        rawText.replace(anySpeakMarkerRegex, "")
-    }
-    val withoutProtocolLabels = withoutTaggedBlock
-        .replace(spokenLineRegex, "")
-        .replace(feedbackLabelRegex, "")
+    val visibleText = rawText
         .replace(anySpeakMarkerRegex, "")
+        .replace(legacySpokenLineRegex) { match -> match.groupValues[1] }
+        .replace(feedbackLabelRegex, "")
         .trimForTutorOutput()
-
-    val explicitSpokenText = taggedSpokenText ?: labelledSpokenText
-    val spokenText = explicitSpokenText
-        ?: withoutProtocolLabels.lineSequence().firstOrNull { it.isNotBlank() }?.trimForTutorOutput()
-    val visibleText = buildList {
-        if (withoutProtocolLabels.isNotBlank()) add(withoutProtocolLabels)
-        if (!explicitSpokenText.isNullOrBlank() && none { it == explicitSpokenText }) {
-            add(explicitSpokenText)
+        .ifBlank {
+            "The local tutor did not return a readable answer."
         }
-    }.joinToString("\n\n").ifBlank {
-        spokenText ?: "The local tutor did not return a readable answer."
-    }
+    val spokenText = visibleText
+        .replace(spokenSectionLabelRegex, "")
+        .trimForTutorOutput()
+        .takeIf { it.isNotBlank() }
 
     return ParsedTutorResponse(
         visibleText = visibleText,
         spokenText = spokenText,
     )
 }
+
+private const val MAX_GENERATION_ATTEMPTS = 3
+private const val MIN_USABLE_STAGE_LENGTH = 12
+private const val ANALYSIS_MAX_OUTPUT_TOKENS = 512
+private const val REPLY_MAX_OUTPUT_TOKENS = 256
+private const val MAX_HISTORY_CHARS = 1_200
+private const val MAX_CURRENT_MESSAGE_CHARS = 800
+
+private val generationStageHeadingRegex = Regex(
+    pattern = """(?im)^\s*(?:analysis|language analysis|reply|answer|response)\s*:\s*""",
+)
+
+private fun String.cleanGenerationStage(): String =
+    replace(generationStageHeadingRegex, "")
+        .trimForTutorOutput()
+
+private fun String.isKnownBoilerplateResponse(): Boolean {
+    val normalized = lowercase()
+    return listOf(
+        "would you like to start",
+        "i'm here to help with pistols",
+        "you are asking for help",
+        "you're asking for help",
+        "which is a good start",
+    ).any(normalized::contains)
+}
+
+internal fun composeTutorResponse(analysis: String, reply: String): ParsedTutorResponse =
+    parseTutorResponse(
+        """
+            Analysis: ${analysis.cleanGenerationStage()}
+
+            Reply: ${reply.cleanGenerationStage()}
+        """.trimIndent(),
+    )
 
 private fun String.trimForTutorOutput(): String =
     trim(' ', '\t', '\r', '\n', '"', '\'', '“', '”')
@@ -222,15 +291,25 @@ private fun buildModelInput(
 ): String {
     if (messages.isEmpty()) return userText
 
-    val recentConversation = messages.takeLast(6).joinToString("\n") { message ->
-        val role = if (message.role == ConversationRole.User) "Learner" else "Tutor"
-        "$role: ${message.text.replace('\n', ' ')}"
-    }
+    var remainingCharacters = MAX_HISTORY_CHARS
+    val recentConversation = messages
+        .asReversed()
+        .mapNotNull { message ->
+            if (remainingCharacters <= 0) return@mapNotNull null
+
+            val role = if (message.role == ConversationRole.User) "Learner" else "Tutor"
+            val line = "$role: ${message.text.replace('\n', ' ')}"
+            val retainedLine = line.take(remainingCharacters)
+            remainingCharacters -= retainedLine.length
+            retainedLine
+        }
+        .asReversed()
+        .joinToString("\n")
     return """
         Recent conversation:
         $recentConversation
 
         Current learner message:
-        $userText
+        ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
     """.trimIndent()
 }

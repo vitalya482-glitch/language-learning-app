@@ -31,6 +31,8 @@ class NativeLanguageModelEngine : LanguageModelEngine, Closeable {
                         handle = requireHandle(),
                         systemPrompt = request.systemPrompt,
                         userText = request.userText,
+                        thinkingEnabled = request.thinkingEnabled,
+                        maxOutputTokens = request.maxOutputTokens,
                     ),
                 )
             }
@@ -65,6 +67,8 @@ class NativeLanguageModelEngine : LanguageModelEngine, Closeable {
         handle: Long,
         systemPrompt: String,
         userText: String,
+        thinkingEnabled: Boolean,
+        maxOutputTokens: Int,
     ): String
     private external fun nativeUnload(handle: Long)
     private external fun nativeDestroy(handle: Long)
