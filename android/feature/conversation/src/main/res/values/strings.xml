@@ -20,6 +20,12 @@
     <string name="speech_feedback_mode">Feedback:</string>
     <string name="speech_feedback_text">Text</string>
     <string name="speech_feedback_voice">Voice</string>
+    <string name="speech_flow_mode">Flow</string>
+    <string name="speech_flow_on">On</string>
+    <string name="speech_flow_off">Off</string>
+    <string name="speech_flow_ai_responding">Flow is on. Waiting for the tutor’s reply…</string>
+    <string name="speech_flow_speaking">The tutor is speaking. Listening will resume automatically.</string>
+    <string name="speech_flow_waiting">Flow is on. Speak normally; messages are sent automatically.</string>
     <string name="speech_hold_to_talk">Hold the button while speaking</string>
     <string name="speech_recognizing">Converting speech to text…</string>
     <string name="speech_unavailable">On-device speech recognition is unavailable on this device or Android version.</string>

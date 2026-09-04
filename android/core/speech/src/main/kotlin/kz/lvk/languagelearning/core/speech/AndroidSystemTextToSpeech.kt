@@ -6,6 +6,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,8 @@ data class SystemTtsVoice(
 data class SystemTextToSpeechState(
     val isReady: Boolean = false,
     val isSpeaking: Boolean = false,
+    val activeUtteranceId: String? = null,
+    val lastFinishedUtteranceId: String? = null,
     val languageTag: String? = null,
     val voices: List<SystemTtsVoice> = emptyList(),
     val selectedVoiceId: String? = null,
@@ -34,6 +37,7 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
     private var initialized = false
     private var currentLanguage: SpeechLanguage = SpeechLanguages.English
     private var preferredVoiceId: String? = null
+    private val activeUtteranceId = AtomicReference<String?>(null)
 
     private val _state = MutableStateFlow(SystemTextToSpeechState())
     val state: StateFlow<SystemTextToSpeechState> = _state.asStateFlow()
@@ -130,8 +134,8 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
         }
     }
 
-    fun speak(text: String, language: SpeechLanguage = currentLanguage) {
-        if (text.isBlank()) return
+    fun speak(text: String, language: SpeechLanguage = currentLanguage): String? {
+        if (text.isBlank()) return null
 
         if (language.tag != currentLanguage.tag || _state.value.languageTag != language.tag) {
             prepare(language, preferredVoiceId)
@@ -142,10 +146,20 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
             _state.update {
                 it.copy(errorMessage = "System Text-to-Speech is not ready")
             }
-            return
+            return null
         }
 
         val utteranceId = "language-learning-${System.nanoTime()}"
+        activeUtteranceId.set(utteranceId)
+        // Publish the queued state before calling Android. Very short utterances may finish
+        // on another thread immediately after speak() returns.
+        _state.update {
+            it.copy(
+                isSpeaking = true,
+                activeUtteranceId = utteranceId,
+                errorMessage = null,
+            )
+        }
         val result = activeEngine.speak(
             text,
             TextToSpeech.QUEUE_FLUSH,
@@ -154,22 +168,23 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
         )
 
         if (result == TextToSpeech.ERROR) {
+            activeUtteranceId.compareAndSet(utteranceId, null)
             _state.update {
                 it.copy(
                     isSpeaking = false,
+                    activeUtteranceId = null,
                     errorMessage = "Android Text-to-Speech could not start playback",
                 )
             }
-        } else {
-            // Reflect queued playback immediately. Some Android voices need a few seconds
-            // before onStart(), which otherwise makes a successful tap look ignored.
-            _state.update { it.copy(isSpeaking = true, errorMessage = null) }
+            return null
         }
+        return utteranceId
     }
 
     fun stop() {
+        activeUtteranceId.set(null)
         engine?.stop()
-        _state.update { it.copy(isSpeaking = false) }
+        _state.update { it.copy(isSpeaking = false, activeUtteranceId = null) }
     }
 
     override fun close() {
@@ -182,36 +197,50 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
     private fun installUtteranceListener() {
         engine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
-                _state.update { it.copy(isSpeaking = true, errorMessage = null) }
+                if (utteranceId == activeUtteranceId.get()) {
+                    _state.update {
+                        it.copy(
+                            isSpeaking = true,
+                            activeUtteranceId = utteranceId,
+                            errorMessage = null,
+                        )
+                    }
+                }
             }
 
             override fun onDone(utteranceId: String?) {
-                _state.update { it.copy(isSpeaking = false) }
+                finishUtterance(utteranceId)
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
-                _state.update {
-                    it.copy(
-                        isSpeaking = false,
-                        errorMessage = "System Text-to-Speech playback failed",
-                    )
-                }
+                finishUtterance(utteranceId, "System Text-to-Speech playback failed")
             }
 
             override fun onError(utteranceId: String?, errorCode: Int) {
-                _state.update {
-                    it.copy(
-                        isSpeaking = false,
-                        errorMessage = "System Text-to-Speech playback failed: $errorCode",
-                    )
-                }
+                finishUtterance(
+                    utteranceId,
+                    "System Text-to-Speech playback failed: $errorCode",
+                )
             }
 
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                _state.update { it.copy(isSpeaking = false) }
+                finishUtterance(utteranceId)
             }
         })
+    }
+
+    private fun finishUtterance(utteranceId: String?, errorMessage: String? = null) {
+        if (utteranceId == null || !activeUtteranceId.compareAndSet(utteranceId, null)) return
+
+        _state.update {
+            it.copy(
+                isSpeaking = false,
+                activeUtteranceId = null,
+                lastFinishedUtteranceId = utteranceId,
+                errorMessage = errorMessage,
+            )
+        }
     }
 
     private fun toVoiceOption(voice: Voice): SystemTtsVoice {

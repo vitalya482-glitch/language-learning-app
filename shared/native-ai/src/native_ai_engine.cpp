@@ -219,7 +219,7 @@ void NativeAiEngine::load(ModelDescriptor model) {
 std::string NativeAiEngine::generate(
     const std::string& system_prompt,
     const std::string& user_text
-) const {
+) {
     if (model_handle_ == nullptr || context_handle_ == nullptr) {
         throw std::logic_error("A model must be loaded before generation");
     }
@@ -241,8 +241,39 @@ std::string NativeAiEngine::generate(
         throw std::invalid_argument("The prompt is too long for the mobile inference context");
     }
 
-    llama_memory_clear(llama_get_memory(context_handle_), true);
     llama_synchronize(context_handle_);
+
+    size_t reusable_prefix = 0;
+    const size_t comparable_tokens = std::min(
+        cached_prompt_tokens_.size(),
+        prompt_tokens.size()
+    );
+    while (
+        reusable_prefix < comparable_tokens &&
+        cached_prompt_tokens_[reusable_prefix] == prompt_tokens[reusable_prefix]
+    ) {
+        ++reusable_prefix;
+    }
+
+    // Re-evaluate at least the final prompt token so llama.cpp exposes fresh logits.
+    if (reusable_prefix == prompt_tokens.size() && reusable_prefix > 0) {
+        --reusable_prefix;
+    }
+
+    llama_memory_t memory = llama_get_memory(context_handle_);
+    if (reusable_prefix == 0 || cached_prompt_tokens_.empty()) {
+        llama_memory_clear(memory, false);
+    } else if (!llama_memory_seq_rm(
+        memory,
+        0,
+        static_cast<llama_pos>(reusable_prefix),
+        -1
+    )) {
+        // Some model memory implementations cannot remove a partial sequence.
+        // Falling back to a full clear preserves correctness.
+        llama_memory_clear(memory, false);
+        reusable_prefix = 0;
+    }
 
     std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
         llama_sampler_chain_init(llama_sampler_chain_default_params()),
@@ -256,8 +287,8 @@ std::string NativeAiEngine::generate(
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(42));
 
     llama_batch batch = llama_batch_get_one(
-        prompt_tokens.data(),
-        static_cast<int32_t>(prompt_tokens.size())
+        prompt_tokens.data() + reusable_prefix,
+        static_cast<int32_t>(prompt_tokens.size() - reusable_prefix)
     );
 
     std::string response;
@@ -274,9 +305,14 @@ std::string NativeAiEngine::generate(
 
         const int32_t decode_result = llama_decode(context_handle_, batch);
         if (decode_result != 0) {
+            cached_prompt_tokens_.clear();
             throw std::runtime_error(
                 "llama.cpp decode failed with code " + std::to_string(decode_result)
             );
+        }
+
+        if (generated == 0) {
+            cached_prompt_tokens_.assign(prompt_tokens.begin(), prompt_tokens.end());
         }
 
         generated_token = llama_sampler_sample(sampler.get(), context_handle_, -1);
@@ -304,6 +340,7 @@ void NativeAiEngine::unload() noexcept {
         llama_free(context_handle_);
         context_handle_ = nullptr;
     }
+    cached_prompt_tokens_.clear();
     if (model_handle_ != nullptr) {
         llama_model_free(model_handle_);
         model_handle_ = nullptr;

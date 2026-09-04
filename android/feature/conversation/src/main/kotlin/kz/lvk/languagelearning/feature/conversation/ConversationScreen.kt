@@ -79,6 +79,8 @@ fun ConversationScreen(
         mutableStateOf(false)
     }
     var voiceFeedbackEnabled by rememberSaveable { mutableStateOf(false) }
+    var flowModeEnabled by remember { mutableStateOf(false) }
+    var flowReplyUtteranceId by remember { mutableStateOf<String?>(null) }
     var showConversationViewer by rememberSaveable { mutableStateOf(false) }
     var lastAutoSpokenMessageId by remember { mutableStateOf<Long?>(null) }
     var generationElapsedMs by remember { mutableLongStateOf(0L) }
@@ -91,6 +93,7 @@ fun ConversationScreen(
     }
     val speechState by speechRecognizer.state.collectAsStateWithLifecycle()
     val ttsState by systemTts.state.collectAsStateWithLifecycle()
+    var lastHandledSpeechResultId by remember { mutableLongStateOf(speechState.resultId) }
     val activeSpeechLanguage = if (useNativeSpeechLanguage) {
         nativeSpeechLanguage
     } else {
@@ -117,6 +120,7 @@ fun ConversationScreen(
         lastAssistantMessage?.id,
         lastAssistantMessage?.spokenText,
         ttsState.isReady,
+        flowModeEnabled,
     ) {
         val message = lastAssistantMessage
         val spokenText = message?.spokenText
@@ -127,14 +131,76 @@ fun ConversationScreen(
             message.id != lastAutoSpokenMessageId &&
             !spokenText.isNullOrBlank()
         ) {
-            lastAutoSpokenMessageId = message.id
-            systemTts.speak(spokenText, speechLanguage)
+            val utteranceId = systemTts.speak(spokenText, speechLanguage)
+            if (utteranceId != null) {
+                lastAutoSpokenMessageId = message.id
+                if (flowModeEnabled) {
+                    flowReplyUtteranceId = utteranceId
+                }
+            } else if (flowModeEnabled) {
+                delay(FLOW_RESTART_DELAY_MS)
+                if (!state.isGenerating) {
+                    speechRecognizer.startListening(activeSpeechLanguage)
+                }
+            }
         }
     }
 
-    LaunchedEffect(speechState.finalText) {
-        if (speechState.finalText.isNotBlank()) {
-            input = speechState.finalText
+    LaunchedEffect(speechState.resultId, flowModeEnabled) {
+        if (speechState.resultId == lastHandledSpeechResultId) return@LaunchedEffect
+        lastHandledSpeechResultId = speechState.resultId
+
+        val recognizedText = speechState.finalText.trim()
+        if (recognizedText.isNotEmpty()) {
+            input = recognizedText
+            if (flowModeEnabled && state.isEngineReady && !state.isGenerating) {
+                onSendMessage(recognizedText)
+                input = ""
+            }
+        } else if (flowModeEnabled) {
+            delay(FLOW_RESTART_DELAY_MS)
+            speechRecognizer.startListening(activeSpeechLanguage)
+        }
+    }
+
+    LaunchedEffect(
+        flowModeEnabled,
+        flowReplyUtteranceId,
+        ttsState.lastFinishedUtteranceId,
+    ) {
+        val replyUtteranceId = flowReplyUtteranceId
+        if (
+            flowModeEnabled &&
+            replyUtteranceId != null &&
+            replyUtteranceId == ttsState.lastFinishedUtteranceId
+        ) {
+            delay(FLOW_RESTART_DELAY_MS)
+            val latestSpeechState = speechRecognizer.state.value
+            if (!latestSpeechState.isListening && !latestSpeechState.isFinalizing) {
+                speechRecognizer.startListening(activeSpeechLanguage)
+            }
+            flowReplyUtteranceId = null
+        }
+    }
+
+    LaunchedEffect(flowModeEnabled, speechState.errorCode) {
+        val retryableError = speechState.errorCode in setOf(
+            SpeechRecognizer.ERROR_NO_MATCH,
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+        )
+        if (flowModeEnabled && retryableError) {
+            delay(FLOW_RETRY_DELAY_MS)
+            speechRecognizer.startListening(activeSpeechLanguage)
+        }
+    }
+
+    LaunchedEffect(flowModeEnabled, state.errorMessage) {
+        if (flowModeEnabled && state.errorMessage != null) {
+            flowModeEnabled = false
+            flowReplyUtteranceId = null
+            speechRecognizer.stopListening()
+            systemTts.stop()
         }
     }
 
@@ -154,6 +220,11 @@ fun ConversationScreen(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         microphonePermissionDenied = !granted
+        if (granted && flowModeEnabled && !state.isGenerating) {
+            speechRecognizer.startListening(activeSpeechLanguage)
+        } else if (!granted) {
+            flowModeEnabled = false
+        }
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -248,8 +319,40 @@ fun ConversationScreen(
                 onUseNativeLanguage = { useNativeSpeechLanguage = true },
                 onUseTargetLanguage = { useNativeSpeechLanguage = false },
                 voiceFeedbackEnabled = voiceFeedbackEnabled,
+                flowModeEnabled = flowModeEnabled,
+                flowModeAvailable = state.isEngineReady && ttsState.isReady,
+                isGenerating = state.isGenerating,
+                isSpeaking = ttsState.isSpeaking,
+                onToggleFlowMode = {
+                    if (flowModeEnabled) {
+                        flowModeEnabled = false
+                        flowReplyUtteranceId = null
+                        speechRecognizer.stopListening()
+                        systemTts.stop()
+                    } else {
+                        lastHandledSpeechResultId = speechState.resultId
+                        lastAutoSpokenMessageId = lastAssistantMessage?.id
+                        flowModeEnabled = true
+                        voiceFeedbackEnabled = true
+                        flowReplyUtteranceId = null
+
+                        if (!state.isGenerating) {
+                            systemTts.stop()
+                            if (
+                                context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                speechRecognizer.startListening(activeSpeechLanguage)
+                            } else {
+                                microphonePermissionDenied = false
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+                    }
+                },
                 onUseTextFeedback = {
                     voiceFeedbackEnabled = false
+                    flowReplyUtteranceId = null
                     systemTts.stop()
                 },
                 onUseVoiceFeedback = {
@@ -281,7 +384,7 @@ fun ConversationScreen(
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state.isEngineReady && !state.isGenerating,
+                enabled = state.isEngineReady && !state.isGenerating && !flowModeEnabled,
                 label = { Text(stringResource(R.string.conversation_input_label)) },
                 minLines = 2,
                 maxLines = 4,
@@ -295,7 +398,7 @@ fun ConversationScreen(
                         systemTts.speak(input, speechLanguage)
                     }
                 },
-                enabled = input.isNotBlank() && ttsState.isReady,
+                enabled = input.isNotBlank() && ttsState.isReady && !flowModeEnabled,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -320,7 +423,10 @@ fun ConversationScreen(
                     onSendMessage(input)
                     input = ""
                 },
-                enabled = input.isNotBlank() && state.isEngineReady && !state.isGenerating,
+                enabled = input.isNotBlank() &&
+                    state.isEngineReady &&
+                    !state.isGenerating &&
+                    !flowModeEnabled,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.conversation_send))
@@ -349,6 +455,11 @@ private fun SpeechInputControl(
     onUseNativeLanguage: () -> Unit,
     onUseTargetLanguage: () -> Unit,
     voiceFeedbackEnabled: Boolean,
+    flowModeEnabled: Boolean,
+    flowModeAvailable: Boolean,
+    isGenerating: Boolean,
+    isSpeaking: Boolean,
+    onToggleFlowMode: () -> Unit,
     onUseTextFeedback: () -> Unit,
     onUseVoiceFeedback: () -> Unit,
     microphonePermissionDenied: Boolean,
@@ -389,7 +500,9 @@ private fun SpeechInputControl(
                 )
                 TextButton(
                     onClick = onUseNativeLanguage,
-                    enabled = !speechState.isListening && !speechState.isFinalizing,
+                    enabled = !flowModeEnabled &&
+                        !speechState.isListening &&
+                        !speechState.isFinalizing,
                 ) {
                     Text(
                         if (useNativeLanguage) {
@@ -401,7 +514,9 @@ private fun SpeechInputControl(
                 }
                 TextButton(
                     onClick = onUseTargetLanguage,
-                    enabled = !speechState.isListening && !speechState.isFinalizing,
+                    enabled = !flowModeEnabled &&
+                        !speechState.isListening &&
+                        !speechState.isFinalizing,
                 ) {
                     Text(
                         if (!useNativeLanguage) {
@@ -415,46 +530,85 @@ private fun SpeechInputControl(
             Spacer(Modifier.height(4.dp))
         }
 
-        Surface(
-            shape = CircleShape,
-            color = if (speechState.isListening) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.primaryContainer
-            },
-            contentColor = if (speechState.isListening) {
-                MaterialTheme.colorScheme.onPrimary
-            } else {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            },
-            modifier = Modifier
-                .size(104.dp)
-                .pointerInput(speechState.isAvailable, useNativeLanguage) {
-                    detectTapGestures(
-                        onPress = {
-                            if (speechState.isAvailable) {
-                                if (hasMicrophonePermission()) {
-                                    onStartListening()
-                                } else {
-                                    onRequestPermission()
-                                }
-                            }
-                            tryAwaitRelease()
-                            onStopListening()
-                        },
-                    )
-                },
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = if (speechState.isListening) {
-                        stringResource(R.string.speech_listening_button)
-                    } else {
-                        stringResource(R.string.speech_talk_button)
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
-                )
+            OutlinedButton(
+                onClick = onToggleFlowMode,
+                enabled = flowModeEnabled || (
+                    flowModeAvailable &&
+                        speechState.isAvailable &&
+                        !speechState.isListening &&
+                        !speechState.isFinalizing
+                    ),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .widthIn(max = 112.dp),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(stringResource(R.string.speech_flow_mode))
+                    Text(
+                        text = stringResource(
+                            if (flowModeEnabled) {
+                                R.string.speech_flow_on
+                            } else {
+                                R.string.speech_flow_off
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            val talkButtonModifier = if (flowModeEnabled) {
+                Modifier.size(104.dp)
+            } else {
+                Modifier
+                    .size(104.dp)
+                    .pointerInput(speechState.isAvailable, useNativeLanguage) {
+                        detectTapGestures(
+                            onPress = {
+                                if (speechState.isAvailable) {
+                                    if (hasMicrophonePermission()) {
+                                        onStartListening()
+                                    } else {
+                                        onRequestPermission()
+                                    }
+                                }
+                                tryAwaitRelease()
+                                onStopListening()
+                            },
+                        )
+                    }
+            }
+
+            Surface(
+                shape = CircleShape,
+                color = if (speechState.isListening) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer
+                },
+                contentColor = if (speechState.isListening) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                },
+                modifier = talkButtonModifier,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = when {
+                            speechState.isListening ->
+                                stringResource(R.string.speech_listening_button)
+                            flowModeEnabled -> stringResource(R.string.speech_flow_mode)
+                            else -> stringResource(R.string.speech_talk_button)
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
 
@@ -471,7 +625,9 @@ private fun SpeechInputControl(
             )
             TextButton(
                 onClick = onUseTextFeedback,
-                enabled = !speechState.isListening && !speechState.isFinalizing,
+                enabled = !flowModeEnabled &&
+                    !speechState.isListening &&
+                    !speechState.isFinalizing,
             ) {
                 Text(
                     if (!voiceFeedbackEnabled) {
@@ -605,6 +761,27 @@ private fun SpeechInputControl(
                     textAlign = TextAlign.Center,
                 )
 
+                flowModeEnabled && isGenerating -> Text(
+                    text = stringResource(R.string.speech_flow_ai_responding),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+
+                flowModeEnabled && isSpeaking -> Text(
+                    text = stringResource(R.string.speech_flow_speaking),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+
+                flowModeEnabled -> Text(
+                    text = stringResource(R.string.speech_flow_waiting),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+
                 else -> Text(
                     text = stringResource(R.string.speech_hold_to_talk),
                     style = MaterialTheme.typography.bodySmall,
@@ -657,6 +834,9 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
     val seconds = totalSeconds % 60L
     return String.format(Locale.US, "%02d:%02d", minutes, seconds)
 }
+
+private const val FLOW_RESTART_DELAY_MS = 350L
+private const val FLOW_RETRY_DELAY_MS = 700L
 
 @Composable
 private fun ConversationViewerDialog(

@@ -20,6 +20,12 @@
     <string name="speech_feedback_mode">Обратная связь:</string>
     <string name="speech_feedback_text">Текст</string>
     <string name="speech_feedback_voice">Голос</string>
+    <string name="speech_flow_mode">Поток</string>
+    <string name="speech_flow_on">Включён</string>
+    <string name="speech_flow_off">Выключен</string>
+    <string name="speech_flow_ai_responding">Поток включён. Ждём ответ преподавателя…</string>
+    <string name="speech_flow_speaking">Преподаватель отвечает. После озвучивания микрофон включится сам.</string>
+    <string name="speech_flow_waiting">Поток включён. Просто говорите — сообщение отправится автоматически.</string>
     <string name="speech_hold_to_talk">Удерживайте кнопку, пока говорите</string>
     <string name="speech_recognizing">Преобразуем речь в текст…</string>
     <string name="speech_unavailable">Локальное распознавание речи недоступно на этом устройстве или версии Android.</string>
