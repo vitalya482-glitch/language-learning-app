@@ -224,7 +224,7 @@ private val feedbackLabelRegex = Regex(
 )
 
 private val spokenSectionLabelRegex = Regex(
-    pattern = """(?im)^\s*(?:analysis|reply)\s*:\s*""",
+    pattern = """(?im)^[ \t]*(?:analysis|reply)[ \t]*:[ \t]*""",
 )
 
 internal fun parseTutorResponse(rawText: String): ParsedTutorResponse {
@@ -255,7 +255,7 @@ private const val MAX_HISTORY_CHARS = 1_200
 private const val MAX_CURRENT_MESSAGE_CHARS = 800
 
 private val generationStageHeadingRegex = Regex(
-    pattern = """(?im)^\s*(?:analysis|language analysis|reply|answer|response)\s*:\s*""",
+    pattern = """(?im)^[ \t]*(?:analysis|language analysis|reply|answer|response)[ \t]*:[ \t]*""",
 )
 
 private fun String.cleanGenerationStage(): String =
