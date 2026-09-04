@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +74,8 @@ fun ConversationScreen(
     var useNativeSpeechLanguage by remember(nativeSpeechLanguage.tag, speechLanguage.tag) {
         mutableStateOf(false)
     }
+    var voiceFeedbackEnabled by rememberSaveable { mutableStateOf(false) }
+    var lastAutoSpokenMessageId by remember { mutableStateOf<Long?>(null) }
     var generationElapsedMs by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
     val speechRecognizer = remember(context) {
@@ -89,6 +92,9 @@ fun ConversationScreen(
         speechLanguage
     }
     val activeSpeechLanguageDisplayName = activeSpeechLanguage.displayName()
+    val lastAssistantMessage = state.messages.lastOrNull {
+        it.role == ConversationRole.Assistant
+    }
 
     DisposableEffect(speechRecognizer, systemTts) {
         onDispose {
@@ -99,6 +105,26 @@ fun ConversationScreen(
 
     LaunchedEffect(speechLanguage.tag, ttsVoiceId) {
         systemTts.prepare(speechLanguage, ttsVoiceId)
+    }
+
+    LaunchedEffect(
+        voiceFeedbackEnabled,
+        lastAssistantMessage?.id,
+        lastAssistantMessage?.spokenText,
+        ttsState.isReady,
+    ) {
+        val message = lastAssistantMessage
+        val spokenText = message?.spokenText
+        if (
+            voiceFeedbackEnabled &&
+            ttsState.isReady &&
+            message != null &&
+            message.id != lastAutoSpokenMessageId &&
+            !spokenText.isNullOrBlank()
+        ) {
+            lastAutoSpokenMessageId = message.id
+            systemTts.speak(spokenText, speechLanguage)
+        }
     }
 
     LaunchedEffect(speechState.finalText) {
@@ -207,6 +233,15 @@ fun ConversationScreen(
                 showLanguageSelector = nativeSpeechLanguage.tag != speechLanguage.tag,
                 onUseNativeLanguage = { useNativeSpeechLanguage = true },
                 onUseTargetLanguage = { useNativeSpeechLanguage = false },
+                voiceFeedbackEnabled = voiceFeedbackEnabled,
+                onUseTextFeedback = {
+                    voiceFeedbackEnabled = false
+                    systemTts.stop()
+                },
+                onUseVoiceFeedback = {
+                    lastAutoSpokenMessageId = lastAssistantMessage?.id
+                    voiceFeedbackEnabled = true
+                },
                 microphonePermissionDenied = microphonePermissionDenied,
                 onRequestPermission = {
                     microphonePermissionDenied = false
@@ -290,6 +325,9 @@ private fun SpeechInputControl(
     showLanguageSelector: Boolean,
     onUseNativeLanguage: () -> Unit,
     onUseTargetLanguage: () -> Unit,
+    voiceFeedbackEnabled: Boolean,
+    onUseTextFeedback: () -> Unit,
+    onUseVoiceFeedback: () -> Unit,
     microphonePermissionDenied: Boolean,
     onRequestPermission: () -> Unit,
     hasMicrophonePermission: () -> Boolean,
@@ -397,7 +435,43 @@ private fun SpeechInputControl(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.speech_feedback_mode),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = onUseTextFeedback,
+                enabled = !speechState.isListening && !speechState.isFinalizing,
+            ) {
+                Text(
+                    if (!voiceFeedbackEnabled) {
+                        "✓ ${stringResource(R.string.speech_feedback_text)}"
+                    } else {
+                        stringResource(R.string.speech_feedback_text)
+                    },
+                )
+            }
+            TextButton(
+                onClick = onUseVoiceFeedback,
+                enabled = !speechState.isListening && !speechState.isFinalizing,
+            ) {
+                Text(
+                    if (voiceFeedbackEnabled) {
+                        "✓ ${stringResource(R.string.speech_feedback_voice)}"
+                    } else {
+                        stringResource(R.string.speech_feedback_voice)
+                    },
+                )
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
