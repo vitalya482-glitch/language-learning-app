@@ -1,15 +1,15 @@
 <resources>
-    <string name="conversation_title">Native AI smoke test</string>
+    <string name="conversation_title">Local AI tutor</string>
     <string name="conversation_back">Back</string>
-    <string name="conversation_loading">Loading the native C++ engine…</string>
-    <string name="conversation_ready">The native engine is ready. Send a message to test the JNI bridge.</string>
+    <string name="conversation_loading">Loading the local AI model…</string>
+    <string name="conversation_ready">Local AI is ready. Say or type a phrase to start.</string>
     <string name="conversation_input_label">Message</string>
     <string name="conversation_speak_text">Speak text</string>
     <string name="conversation_stop_speaking">Stop speaking</string>
     <string name="conversation_tts_error">System voice: %1$s</string>
-    <string name="conversation_send">Send to C++</string>
+    <string name="conversation_send">Send</string>
     <string name="conversation_retry">Retry</string>
-    <string name="conversation_error">Native engine error: %1$s</string>
+    <string name="conversation_error">Local AI error: %1$s</string>
     <string name="speech_talk_button">Talk</string>
     <string name="speech_listening_button">Listening…</string>
     <string name="speech_hold_to_talk">Hold the button while speaking</string>
