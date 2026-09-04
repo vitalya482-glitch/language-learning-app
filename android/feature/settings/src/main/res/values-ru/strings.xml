@@ -7,6 +7,7 @@
     <string name="settings_learning_level">Уровень</string>
     <string name="settings_voice_title">Голос озвучивания</string>
     <string name="settings_voice_system_note">Голоса предоставляет системный Android Text-to-Speech. Они устанавливаются и хранятся в системе телефона и не являются частью Language Learning.</string>
+    <string name="settings_voice_preview_note">Нажмите на голос, чтобы выбрать его и сразу услышать короткий пример.</string>
     <string name="settings_voice_language">Язык: %1$s</string>
     <string name="settings_voice_loading">Загружаем список системных голосов…</string>
     <string name="settings_voice_none">Для этого языка системные голоса не найдены.</string>
