@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kz.lvk.languagelearning.core.settings.AppLanguage
 import kz.lvk.languagelearning.core.settings.AppSettings
+import kz.lvk.languagelearning.core.settings.DeviceDisplayName
 import kz.lvk.languagelearning.core.settings.LanguageCatalog
 import kz.lvk.languagelearning.core.settings.LearningLevel
 import kz.lvk.languagelearning.core.speech.AndroidSystemTextToSpeech
@@ -63,6 +64,15 @@ fun SettingsScreen(
         SpeechLanguage(targetLanguage.tag)
     }
     val preferredVoiceId = appSettings.ttsVoiceIdsByLanguage[targetLanguage.tag]
+    val previewName = remember(context, appSettings.userDisplayName) {
+        appSettings.userDisplayName
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: DeviceDisplayName.resolve(context.applicationContext)
+    }
+    val previewText = remember(targetLanguage.tag, previewName) {
+        buildVoicePreviewText(targetLanguage, previewName)
+    }
 
     LaunchedEffect(targetLanguage.tag, preferredVoiceId) {
         systemTts.prepare(speechLanguage, preferredVoiceId)
@@ -70,6 +80,12 @@ fun SettingsScreen(
 
     DisposableEffect(systemTts) {
         onDispose { systemTts.close() }
+    }
+
+    fun selectAndPreviewVoice(voiceId: String) {
+        systemTts.selectVoice(speechLanguage, voiceId)
+        onTtsVoiceChange(targetLanguage, voiceId)
+        systemTts.speak(previewText, speechLanguage)
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -148,6 +164,12 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
+                    text = stringResource(R.string.settings_voice_preview_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
                     text = stringResource(
                         R.string.settings_voice_language,
                         targetLanguage.displayName(),
@@ -189,19 +211,13 @@ fun SettingsScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    systemTts.selectVoice(speechLanguage, voice.id)
-                                    onTtsVoiceChange(targetLanguage, voice.id)
-                                }
+                                .clickable { selectAndPreviewVoice(voice.id) }
                                 .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             RadioButton(
                                 selected = voice.id == ttsState.selectedVoiceId,
-                                onClick = {
-                                    systemTts.selectVoice(speechLanguage, voice.id)
-                                    onTtsVoiceChange(targetLanguage, voice.id)
-                                },
+                                onClick = { selectAndPreviewVoice(voice.id) },
                             )
                             Column(
                                 modifier = Modifier
@@ -227,6 +243,25 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+}
+
+private fun buildVoicePreviewText(language: AppLanguage, name: String): String {
+    val greeting = when (language.languageCode) {
+        "de" -> "Hallo"
+        "es" -> "Hola"
+        "fr" -> "Bonjour"
+        "it" -> "Ciao"
+        "ru" -> "Привет"
+        "kk" -> "Сәлем"
+        "zh" -> "你好"
+        else -> "Hello"
+    }
+
+    return if (language.languageCode == "zh") {
+        "$greeting，$name"
+    } else {
+        "$greeting, $name"
     }
 }
 
