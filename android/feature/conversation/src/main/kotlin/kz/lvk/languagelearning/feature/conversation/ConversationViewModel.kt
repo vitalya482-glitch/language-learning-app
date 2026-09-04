@@ -14,11 +14,30 @@ import kz.lvk.languagelearning.core.ai.LocalModelDescriptor
 
 class ConversationViewModel(
     private val engine: LanguageModelEngine,
+    private val model: LocalModelDescriptor?,
+    nativeLanguageTag: String,
+    targetLanguageTag: String,
+    learningLevel: String,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ConversationUiState())
     val state: StateFlow<ConversationUiState> = _state.asStateFlow()
 
     private var nextMessageId = 0L
+
+    private val tutorSystemPrompt = """
+        You are a concise, friendly language tutor running fully offline on the learner's phone.
+        The learner's native language is $nativeLanguageTag.
+        The language being learned is $targetLanguageTag.
+        The learner's CEFR level is $learningLevel.
+
+        For each learner message:
+        - If there is a mistake, first show a corrected natural version in the target language.
+        - Briefly explain the important correction in the learner's native language.
+        - If useful for a beginner, give a short translation or hint in the native language.
+        - Continue the conversation with one short natural reply or question in the target language.
+        - If the learner's phrase is already correct, say so briefly and continue the conversation.
+        - Keep the whole answer concise and practical. Do not output hidden reasoning or a thinking section.
+    """.trimIndent()
 
     init {
         loadEngine()
@@ -26,20 +45,25 @@ class ConversationViewModel(
 
     fun loadEngine() {
         _state.update { it.copy(isEngineReady = false, errorMessage = null) }
+
+        val installedModel = model
+        if (installedModel == null) {
+            _state.update {
+                it.copy(
+                    errorMessage = "Локальная AI-модель не установлена. Откройте Настройки → Локальные AI-модели.",
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
             runCatching {
-                engine.load(
-                    LocalModelDescriptor(
-                        id = "native-smoke-test",
-                        displayName = "Native smoke test",
-                        localPath = "native://smoke-test",
-                    ),
-                )
+                engine.load(installedModel)
             }.onSuccess {
                 _state.update { it.copy(isEngineReady = true) }
             }.onFailure { error ->
                 _state.update {
-                    it.copy(errorMessage = error.message ?: "Unable to load native engine")
+                    it.copy(errorMessage = error.message ?: "Unable to load local AI model")
                 }
             }
         }
@@ -67,7 +91,7 @@ class ConversationViewModel(
             runCatching {
                 engine.generate(
                     LanguageModelRequest(
-                        systemPrompt = "You are a concise language tutor.",
+                        systemPrompt = tutorSystemPrompt,
                         userText = userText,
                     ),
                 )
@@ -87,7 +111,7 @@ class ConversationViewModel(
                 _state.update {
                     it.copy(
                         isGenerating = false,
-                        errorMessage = error.message ?: "Native generation failed",
+                        errorMessage = error.message ?: "Local AI generation failed",
                     )
                 }
             }
@@ -96,13 +120,23 @@ class ConversationViewModel(
 
     class Factory(
         private val engine: LanguageModelEngine,
+        private val model: LocalModelDescriptor?,
+        private val nativeLanguageTag: String,
+        private val targetLanguageTag: String,
+        private val learningLevel: String,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             check(modelClass.isAssignableFrom(ConversationViewModel::class.java)) {
                 "Unsupported ViewModel class: ${modelClass.name}"
             }
-            return ConversationViewModel(engine) as T
+            return ConversationViewModel(
+                engine = engine,
+                model = model,
+                nativeLanguageTag = nativeLanguageTag,
+                targetLanguageTag = targetLanguageTag,
+                learningLevel = learningLevel,
+            ) as T
         }
     }
 }
