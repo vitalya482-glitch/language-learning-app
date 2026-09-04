@@ -3,6 +3,7 @@
 #include <string>
 
 struct llama_model;
+struct llama_context;
 
 namespace lvk::language_learning {
 
@@ -32,6 +33,7 @@ public:
 private:
     ModelDescriptor model_;
     llama_model* model_handle_ = nullptr;
+    llama_context* context_handle_ = nullptr;
 };
 
 }  // namespace lvk::language_learning
