@@ -5,6 +5,9 @@
     <string name="settings_native_language">Native language</string>
     <string name="settings_target_language">Learning language</string>
     <string name="settings_learning_level">Level</string>
+    <string name="settings_models_title">Local AI models</string>
+    <string name="settings_models_note">Download and manage local models separately from the application.</string>
+    <string name="settings_models_open">Open model manager</string>
     <string name="settings_voice_title">Voice</string>
     <string name="settings_voice_system_note">Voices are provided by Android system Text-to-Speech and are not part of Language Learning.</string>
     <string name="settings_voice_preview_note">Tap a voice to select it and hear a short preview.</string>
