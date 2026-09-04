@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
                             state = conversationState,
                             onBack = { showConversation = false },
                             onSendMessage = conversationViewModel::sendMessage,
-                            onRetryEngine = conversationViewModel::loadEngine,
+                            onRetryEngine = conversationViewModel::retry,
                             speechLanguage = targetSpeechLanguage,
                             nativeSpeechLanguage = nativeSpeechLanguage,
                             explanationSpeechLanguage = SpeechLanguage(

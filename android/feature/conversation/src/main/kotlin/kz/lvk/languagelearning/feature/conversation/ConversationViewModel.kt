@@ -95,6 +95,27 @@ class ConversationViewModel(
         }
     }
 
+    fun retry() {
+        val current = _state.value
+        val lastMessage = current.messages.lastOrNull()
+        if (
+            current.isEngineReady &&
+            !current.isGenerating &&
+            current.errorMessage != null &&
+            lastMessage?.role == ConversationRole.User
+        ) {
+            _state.update {
+                it.copy(
+                    messages = it.messages.dropLast(1),
+                    errorMessage = null,
+                )
+            }
+            sendMessage(lastMessage.text)
+        } else {
+            loadEngine()
+        }
+    }
+
     fun sendMessage(text: String) {
         val userText = text.trim()
         val currentState = _state.value
@@ -118,63 +139,77 @@ class ConversationViewModel(
             runCatching {
                 val conversationHistory = buildConversationHistory(currentState.messages)
                 val analysisInput = buildAnalysisInput(conversationHistory, userText)
-                val analysis = generateStageWithRetry(
-                    LanguageModelRequest(
-                        systemPrompt = analysisSystemPrompt,
-                        userText = analysisInput,
-                        thinkingEnabled = true,
-                        maxOutputTokens = ANALYSIS_MAX_OUTPUT_TOKENS,
-                    ),
-                    isAcceptable = { candidate ->
-                        candidate.matchesExpectedLanguageScript(explanationLanguageTag)
-                    },
-                )
+                val analysis = try {
+                    generateStageWithRetry(
+                        LanguageModelRequest(
+                            systemPrompt = analysisSystemPrompt,
+                            userText = analysisInput,
+                            thinkingEnabled = true,
+                            maxOutputTokens = ANALYSIS_MAX_OUTPUT_TOKENS,
+                        ),
+                        acceptLastNonEmptyAfterRetries = true,
+                        isAcceptable = { candidate ->
+                            candidate.matchesExpectedLanguageScript(explanationLanguageTag)
+                        },
+                    )
+                } catch (_: NoUsableModelStageException) {
+                    unavailableAnalysisText(explanationLanguageTag)
+                }
 
                 _state.update {
                     it.copy(generationPhase = ConversationGenerationPhase.Composing)
                 }
 
                 val naturalPhrase = if (includeNaturalPhrase) {
-                    generateStageWithRetry(
-                        LanguageModelRequest(
-                            systemPrompt = naturalPhraseSystemPrompt,
-                            userText = buildNaturalPhraseInput(userText, analysis),
-                            thinkingEnabled = false,
-                            maxOutputTokens = NATURAL_PHRASE_MAX_OUTPUT_TOKENS,
-                        ),
-                        rejectBoilerplate = true,
-                        minimumLength = MIN_SHORT_STAGE_LENGTH,
-                        isAcceptable = { candidate ->
-                            val cleaned = candidate.cleanNaturalPhrase()
-                            cleaned.isPlausibleRewriteOf(userText) &&
-                                cleaned.matchesExpectedLanguageScript(targetLanguageTag)
-                        },
-                    ).cleanNaturalPhrase()
+                    try {
+                        generateStageWithRetry(
+                            LanguageModelRequest(
+                                systemPrompt = naturalPhraseSystemPrompt,
+                                userText = buildNaturalPhraseInput(userText, analysis),
+                                thinkingEnabled = false,
+                                maxOutputTokens = NATURAL_PHRASE_MAX_OUTPUT_TOKENS,
+                            ),
+                            rejectBoilerplate = true,
+                            minimumLength = MIN_SHORT_STAGE_LENGTH,
+                            isAcceptable = { candidate ->
+                                val cleaned = candidate.cleanNaturalPhrase()
+                                cleaned.isPlausibleRewriteOf(userText) &&
+                                    cleaned.matchesExpectedLanguageScript(targetLanguageTag)
+                            },
+                        ).cleanNaturalPhrase()
+                    } catch (_: NoUsableModelStageException) {
+                        userText
+                    }
                 } else {
                     null
                 }
                 val reply = if (includeConversationReply) {
-                    generateStageWithRetry(
-                        LanguageModelRequest(
-                            systemPrompt = replySystemPrompt,
-                            userText = buildReplyInput(
-                                conversationHistory = conversationHistory,
-                                userText = userText,
-                                analysis = analysis,
+                    try {
+                        generateStageWithRetry(
+                            LanguageModelRequest(
+                                systemPrompt = replySystemPrompt,
+                                userText = buildReplyInput(
+                                    conversationHistory = conversationHistory,
+                                    userText = userText,
+                                    analysis = analysis,
+                                ),
+                                thinkingEnabled = false,
+                                maxOutputTokens = REPLY_MAX_OUTPUT_TOKENS,
                             ),
-                            thinkingEnabled = false,
-                            maxOutputTokens = REPLY_MAX_OUTPUT_TOKENS,
-                        ),
-                        rejectBoilerplate = true,
-                        isAcceptable = { candidate ->
-                            candidate.matchesExpectedLanguageScript(targetLanguageTag) &&
-                                currentState.messages
-                                .asSequence()
-                                .filter { it.role == ConversationRole.Assistant }
-                                .mapNotNull { it.conversationText }
-                                .none { previous -> candidate.isNearDuplicateOf(previous) }
-                        },
-                    )
+                            rejectBoilerplate = true,
+                            acceptLastNonEmptyAfterRetries = true,
+                            isAcceptable = { candidate ->
+                                candidate.matchesExpectedLanguageScript(targetLanguageTag) &&
+                                    currentState.messages
+                                    .asSequence()
+                                    .filter { it.role == ConversationRole.Assistant }
+                                    .mapNotNull { it.conversationText }
+                                    .none { previous -> candidate.isNearDuplicateOf(previous) }
+                            },
+                        )
+                    } catch (_: NoUsableModelStageException) {
+                        fallbackConversationReply(targetLanguageTag)
+                    }
                 } else {
                     null
                 }
@@ -217,13 +252,18 @@ class ConversationViewModel(
         request: LanguageModelRequest,
         rejectBoilerplate: Boolean = false,
         minimumLength: Int = MIN_USABLE_STAGE_LENGTH,
+        acceptLastNonEmptyAfterRetries: Boolean = false,
         isAcceptable: (String) -> Boolean = { true },
     ): String {
         var lastFailure: Throwable? = null
+        var lastNonEmptyText: String? = null
 
         repeat(MAX_GENERATION_ATTEMPTS) {
             try {
                 val text = engine.generate(request).text.cleanGenerationStage()
+                if (text.isNotBlank()) {
+                    lastNonEmptyText = text
+                }
                 if (
                     text.length >= minimumLength &&
                     (!rejectBoilerplate || !text.isKnownBoilerplateResponse()) &&
@@ -241,7 +281,11 @@ class ConversationViewModel(
             }
         }
 
-        throw IllegalStateException(
+        if (acceptLastNonEmptyAfterRetries && lastNonEmptyText != null) {
+            return lastNonEmptyText
+        }
+
+        throw NoUsableModelStageException(
             "The local model did not return a usable answer after $MAX_GENERATION_ATTEMPTS attempts",
             lastFailure,
         )
@@ -284,6 +328,11 @@ internal data class ParsedTutorResponse(
     val speechSegments: List<ConversationSpeechSegment>,
     val conversationText: String?,
 )
+
+private class NoUsableModelStageException(
+    message: String,
+    cause: Throwable?,
+) : IllegalStateException(message, cause)
 
 private val anySpeakMarkerRegex = Regex(
     pattern = """(?i)\[\s*\[\s*/?\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
@@ -431,6 +480,30 @@ internal fun naturalPhraseIntroduction(languageTag: String): String =
         "kk" -> "Бұл сөйлем табиғи түрде былай айтылады:"
         "zh" -> "更自然的说法是："
         else -> "A more natural way to say this is:"
+    }
+
+private fun unavailableAnalysisText(languageTag: String): String =
+    when (languageTag.substringBefore('-').lowercase()) {
+        "ru" -> "Подробный разбор получить не удалось, но разговор можно продолжить."
+        "de" -> "Die ausführliche Analyse war nicht verfügbar, aber wir können weiterreden."
+        "es" -> "No se pudo obtener el análisis detallado, pero podemos continuar."
+        "fr" -> "L’analyse détaillée n’est pas disponible, mais nous pouvons continuer."
+        "it" -> "L’analisi dettagliata non è disponibile, ma possiamo continuare."
+        "kk" -> "Толық талдау қолжетімсіз болды, бірақ әңгімені жалғастыра аламыз."
+        "zh" -> "暂时无法获得详细分析，但我们可以继续对话。"
+        else -> "The detailed analysis was unavailable, but we can continue."
+    }
+
+private fun fallbackConversationReply(languageTag: String): String =
+    when (languageTag.substringBefore('-').lowercase()) {
+        "ru" -> "Расскажите об этом немного подробнее. Что для вас здесь самое важное?"
+        "de" -> "Erzähl mir bitte etwas mehr darüber. Was ist dir dabei am wichtigsten?"
+        "es" -> "Cuéntame un poco más sobre eso. ¿Qué es lo más importante para ti?"
+        "fr" -> "Parlez-m’en un peu plus. Qu’est-ce qui est le plus important pour vous ?"
+        "it" -> "Raccontami qualcosa in più. Qual è la cosa più importante per te?"
+        "kk" -> "Бұл туралы толығырақ айтып беріңізші. Сіз үшін ең маңыздысы не?"
+        "zh" -> "请再多说一点。对你来说最重要的是什么？"
+        else -> "Tell me a little more about that. What is most important to you here?"
     }
 
 private fun String.trimForTutorOutput(): String =
