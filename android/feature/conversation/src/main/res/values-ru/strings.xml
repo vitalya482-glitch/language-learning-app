@@ -10,12 +10,15 @@
     <string name="conversation_send">Отправить</string>
     <string name="conversation_retry">Повторить</string>
     <string name="conversation_error">Ошибка локального AI: %1$s</string>
+    <string name="conversation_generating">AI отвечает… %1$s</string>
     <string name="speech_talk_button">Говорить</string>
     <string name="speech_listening_button">Слушаю…</string>
+    <string name="speech_input_language">Микрофон:</string>
     <string name="speech_hold_to_talk">Удерживайте кнопку, пока говорите</string>
     <string name="speech_recognizing">Преобразуем речь в текст…</string>
     <string name="speech_unavailable">Локальное распознавание речи недоступно на этом устройстве или версии Android.</string>
     <string name="speech_permission_denied">Нужен доступ к микрофону. Удержите кнопку ещё раз, чтобы запросить разрешение.</string>
+    <string name="speech_no_match">Речь не распознана как %1$s. Если вы говорите на другом языке, переключите язык микрофона выше.</string>
     <string name="speech_language_model_missing">Для локального распознавания выбранного языка (%1$s) нужен системный языковой пакет Android. Он устанавливается в систему телефона и не является частью приложения Language Learning.</string>
     <string name="speech_download_language_model">Скачать системный пакет: %1$s</string>
     <string name="speech_language_model_download_requested">Android получил запрос на загрузку системного пакета для языка «%1$s». Подтвердите системное окно, если оно появится, дождитесь загрузки и снова удерживайте «Говорить».</string>
