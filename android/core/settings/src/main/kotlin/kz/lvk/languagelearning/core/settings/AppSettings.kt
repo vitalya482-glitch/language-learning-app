@@ -57,6 +57,7 @@ data class AppSettings(
     val learningLevel: LearningLevel = LearningLevel.A1,
     val userDisplayName: String? = null,
     val ttsVoiceIdsByLanguage: Map<String, String> = emptyMap(),
+    val explanationTtsVoiceIdsByLanguage: Map<String, String> = emptyMap(),
 ) {
     val nativeLanguage: AppLanguage
         get() = LanguageCatalog.byTag(nativeLanguageTag) ?: LanguageCatalog.Russian
@@ -66,4 +67,8 @@ data class AppSettings(
 
     val targetVoiceId: String?
         get() = ttsVoiceIdsByLanguage[targetLanguageTag]
+
+    val explanationVoiceId: String?
+        get() = explanationTtsVoiceIdsByLanguage[nativeLanguageTag]
+            ?: ttsVoiceIdsByLanguage[nativeLanguageTag]
 }
