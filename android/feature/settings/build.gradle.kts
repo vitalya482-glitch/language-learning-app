@@ -24,6 +24,8 @@ android {
 dependencies {
     implementation(project(":android:core:speech"))
     implementation(project(":android:core:settings"))
+    implementation(project(":android:core:models"))
+    implementation(project(":android:feature:models"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
