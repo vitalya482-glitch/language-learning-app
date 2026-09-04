@@ -11,6 +11,7 @@ data class ConversationMessage(
     val id: Long,
     val text: String,
     val role: ConversationRole,
+    val spokenText: String? = null,
 )
 
 enum class ConversationRole {
