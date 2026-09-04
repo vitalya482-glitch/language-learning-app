@@ -3,6 +3,9 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -17,6 +20,15 @@ namespace {
 constexpr int32_t kContextTokens = 2048;
 constexpr int32_t kMinGeneratedTokens = 32;
 constexpr int32_t kMaxGeneratedTokens = 512;
+
+uint32_t fresh_sampling_seed() {
+    static std::atomic<uint32_t> sequence{0};
+    const auto clock_value = static_cast<uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count()
+    );
+    const uint32_t next = sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    return static_cast<uint32_t>(clock_value ^ (clock_value >> 32U) ^ next);
+}
 
 int32_t inference_threads() {
     const unsigned int available = std::thread::hardware_concurrency();
@@ -307,7 +319,9 @@ std::string NativeAiEngine::generate(
     );
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_min_p(0.05f, 1));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(0.55f));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    // Every retry must explore a new sample. This matters on small local models: replaying an
+    // empty or boilerplate answer with the same distribution seed can otherwise repeat it exactly.
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(fresh_sampling_seed()));
 
     llama_batch batch = llama_batch_get_one(
         prompt_tokens.data() + reusable_prefix,

@@ -19,26 +19,41 @@ class ConversationViewModel(
     nativeLanguageTag: String,
     targetLanguageTag: String,
     learningLevel: String,
+    includePhraseAnalysis: Boolean,
+    private val includeNaturalPhrase: Boolean,
+    includeConversationReply: Boolean,
+    private val explanationLanguageTag: String,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ConversationUiState())
     val state: StateFlow<ConversationUiState> = _state.asStateFlow()
 
     private var nextMessageId = 0L
+    private val includePhraseAnalysis = includePhraseAnalysis
+    private val includeConversationReply = includeConversationReply ||
+        (!includePhraseAnalysis && !includeNaturalPhrase)
 
     private val analysisSystemPrompt = """
-        You are the careful analysis stage of a language tutor. The learner speaks
-        $nativeLanguageTag and studies $targetLanguageTag at CEFR level $learningLevel. Focus on
-        the CURRENT learner message, while using recent conversation only as context. Identify its
-        exact meaning and topic, then explain any grammar or word-choice issue and give a natural
-        corrected phrase. If it is already natural, say so. Write 1-3 concise learner-facing
-        sentences in simple $targetLanguageTag. Do not answer the learner yet. Do not give generic
-        praise, repeat an earlier topic, use headings, or expose hidden reasoning.
+        You are the analysis stage of a language tutor. The learner speaks $nativeLanguageTag and
+        studies $targetLanguageTag at CEFR level $learningLevel. Carefully understand the CURRENT
+        learner message and use recent conversation only as context. Explain its meaning and any
+        important grammar or word-choice issue. If it is already natural, say that briefly. Write
+        1-3 concise learner-facing sentences in $explanationLanguageTag. Do not answer the learner,
+        suggest several alternatives, use numbered lists, Markdown, headings, generic praise, or
+        an earlier topic. Return only the useful language analysis.
+    """.trimIndent()
+
+    private val naturalPhraseSystemPrompt = """
+        You are the natural-phrase stage of a language tutor. The learner studies
+        $targetLanguageTag at CEFR level $learningLevel. Based on the completed analysis, rewrite
+        the CURRENT learner message as one natural phrase in $targetLanguageTag while preserving
+        its intended meaning. Return only that phrase: no label, translation, quote marks,
+        explanation, list, Markdown, or reply.
     """.trimIndent()
 
     private val replySystemPrompt = """
         You are the response stage of a friendly language tutor. The learner speaks
         $nativeLanguageTag and studies $targetLanguageTag at CEFR level $learningLevel. Use the
-        supplied analysis to answer the CURRENT learner message directly. Write 2-4 natural,
+        supplied analysis to answer the CURRENT learner message directly. Write 1-3 natural,
         specific sentences in $targetLanguageTag and finish with one relevant question that keeps
         the same topic moving. Never fall back to generic praise, offers to start, or a topic from
         an earlier turn. Do not repeat the analysis, use headings, tags, or hidden reasoning.
@@ -109,29 +124,53 @@ class ConversationViewModel(
                     it.copy(generationPhase = ConversationGenerationPhase.Composing)
                 }
 
-                val reply = generateStageWithRetry(
-                    LanguageModelRequest(
-                        systemPrompt = replySystemPrompt,
-                        userText = """
-                            Conversation and current learner message:
-                            $conversationInput
+                val analyzedInput = """
+                    Conversation and current learner message:
+                    $conversationInput
 
-                            Completed language analysis:
-                            $analysis
-                        """.trimIndent(),
-                        thinkingEnabled = false,
-                        maxOutputTokens = REPLY_MAX_OUTPUT_TOKENS,
-                    ),
-                    rejectBoilerplate = true,
+                    Completed language analysis:
+                    $analysis
+                """.trimIndent()
+                val naturalPhrase = if (includeNaturalPhrase) {
+                    generateStageWithRetry(
+                        LanguageModelRequest(
+                            systemPrompt = naturalPhraseSystemPrompt,
+                            userText = analyzedInput,
+                            thinkingEnabled = false,
+                            maxOutputTokens = NATURAL_PHRASE_MAX_OUTPUT_TOKENS,
+                        ),
+                        minimumLength = MIN_SHORT_STAGE_LENGTH,
+                    ).cleanNaturalPhrase()
+                } else {
+                    null
+                }
+                val reply = if (includeConversationReply) {
+                    generateStageWithRetry(
+                        LanguageModelRequest(
+                            systemPrompt = replySystemPrompt,
+                            userText = analyzedInput,
+                            thinkingEnabled = false,
+                            maxOutputTokens = REPLY_MAX_OUTPUT_TOKENS,
+                        ),
+                        rejectBoilerplate = true,
+                    )
+                } else {
+                    null
+                }
+
+                composeTutorResponse(
+                    analysis = analysis.takeIf { includePhraseAnalysis },
+                    naturalPhrase = naturalPhrase,
+                    reply = reply,
+                    naturalPhraseIntroduction = naturalPhraseIntroduction(explanationLanguageTag),
                 )
-
-                composeTutorResponse(analysis, reply)
             }.onSuccess { parsedResponse ->
                 val assistantMessage = ConversationMessage(
                     id = nextMessageId++,
                     text = parsedResponse.visibleText,
                     role = ConversationRole.Assistant,
                     spokenText = parsedResponse.spokenText,
+                    speechSegments = parsedResponse.speechSegments,
                 )
                 _state.update {
                     it.copy(
@@ -155,6 +194,7 @@ class ConversationViewModel(
     private suspend fun generateStageWithRetry(
         request: LanguageModelRequest,
         rejectBoilerplate: Boolean = false,
+        minimumLength: Int = MIN_USABLE_STAGE_LENGTH,
     ): String {
         var lastFailure: Throwable? = null
 
@@ -162,7 +202,7 @@ class ConversationViewModel(
             try {
                 val text = engine.generate(request).text.cleanGenerationStage()
                 if (
-                    text.length >= MIN_USABLE_STAGE_LENGTH &&
+                    text.length >= minimumLength &&
                     (!rejectBoilerplate || !text.isKnownBoilerplateResponse())
                 ) {
                     return text
@@ -189,6 +229,10 @@ class ConversationViewModel(
         private val nativeLanguageTag: String,
         private val targetLanguageTag: String,
         private val learningLevel: String,
+        private val includePhraseAnalysis: Boolean,
+        private val includeNaturalPhrase: Boolean,
+        private val includeConversationReply: Boolean,
+        private val explanationLanguageTag: String,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -201,6 +245,10 @@ class ConversationViewModel(
                 nativeLanguageTag = nativeLanguageTag,
                 targetLanguageTag = targetLanguageTag,
                 learningLevel = learningLevel,
+                includePhraseAnalysis = includePhraseAnalysis,
+                includeNaturalPhrase = includeNaturalPhrase,
+                includeConversationReply = includeConversationReply,
+                explanationLanguageTag = explanationLanguageTag,
             ) as T
         }
     }
@@ -209,6 +257,7 @@ class ConversationViewModel(
 internal data class ParsedTutorResponse(
     val visibleText: String,
     val spokenText: String?,
+    val speechSegments: List<ConversationSpeechSegment>,
 )
 
 private val anySpeakMarkerRegex = Regex(
@@ -244,12 +293,22 @@ internal fun parseTutorResponse(rawText: String): ParsedTutorResponse {
     return ParsedTutorResponse(
         visibleText = visibleText,
         spokenText = spokenText,
+        speechSegments = spokenText?.let {
+            listOf(
+                ConversationSpeechSegment(
+                    text = it,
+                    language = ConversationSpeechLanguage.Target,
+                ),
+            )
+        }.orEmpty(),
     )
 }
 
 private const val MAX_GENERATION_ATTEMPTS = 3
+private const val MIN_SHORT_STAGE_LENGTH = 2
 private const val MIN_USABLE_STAGE_LENGTH = 12
 private const val ANALYSIS_MAX_OUTPUT_TOKENS = 512
+private const val NATURAL_PHRASE_MAX_OUTPUT_TOKENS = 96
 private const val REPLY_MAX_OUTPUT_TOKENS = 256
 private const val MAX_HISTORY_CHARS = 1_200
 private const val MAX_CURRENT_MESSAGE_CHARS = 800
@@ -260,7 +319,17 @@ private val generationStageHeadingRegex = Regex(
 
 private fun String.cleanGenerationStage(): String =
     replace(generationStageHeadingRegex, "")
+        .replace("**", "")
+        .replace(Regex("(?m)^[ \\t]*(?:[-*]|\\d+[.)])[ \\t]+"), "")
         .trimForTutorOutput()
+
+private val naturalPhraseLabelRegex = Regex(
+    pattern = """(?im)^[ \t]*(?:natural(?: corrected)? phrase|correction|corrected)[ \t]*:[ \t]*""",
+)
+
+private fun String.cleanNaturalPhrase(): String =
+    replace(naturalPhraseLabelRegex, "")
+        .cleanGenerationStage()
 
 private fun String.isKnownBoilerplateResponse(): Boolean {
     val normalized = lowercase()
@@ -273,14 +342,64 @@ private fun String.isKnownBoilerplateResponse(): Boolean {
     ).any(normalized::contains)
 }
 
-internal fun composeTutorResponse(analysis: String, reply: String): ParsedTutorResponse =
-    parseTutorResponse(
-        """
-            Analysis: ${analysis.cleanGenerationStage()}
+internal fun composeTutorResponse(
+    analysis: String?,
+    naturalPhrase: String?,
+    reply: String?,
+    naturalPhraseIntroduction: String,
+): ParsedTutorResponse {
+    val visibleSections = mutableListOf<String>()
+    val speechSegments = mutableListOf<ConversationSpeechSegment>()
 
-            Reply: ${reply.cleanGenerationStage()}
-        """.trimIndent(),
+    analysis?.cleanGenerationStage()?.takeIf { it.isNotBlank() }?.let { text ->
+        visibleSections += text
+        speechSegments += ConversationSpeechSegment(
+            text = text,
+            language = ConversationSpeechLanguage.Explanation,
+        )
+    }
+    naturalPhrase?.cleanNaturalPhrase()?.takeIf { it.isNotBlank() }?.let { text ->
+        visibleSections += "$naturalPhraseIntroduction\n$text"
+        speechSegments += ConversationSpeechSegment(
+            text = naturalPhraseIntroduction,
+            language = ConversationSpeechLanguage.Explanation,
+        )
+        speechSegments += ConversationSpeechSegment(
+            text = text,
+            language = ConversationSpeechLanguage.Target,
+        )
+    }
+    reply?.cleanGenerationStage()?.takeIf { it.isNotBlank() }?.let { text ->
+        visibleSections += text
+        speechSegments += ConversationSpeechSegment(
+            text = text,
+            language = ConversationSpeechLanguage.Target,
+        )
+    }
+
+    val fallback = "The local tutor did not return a readable answer."
+    val visibleText = visibleSections.joinToString("\n\n").ifBlank { fallback }
+    val finalSegments = speechSegments.ifEmpty {
+        listOf(ConversationSpeechSegment(fallback, ConversationSpeechLanguage.Target))
+    }
+    return ParsedTutorResponse(
+        visibleText = visibleText,
+        spokenText = finalSegments.joinToString("\n\n") { it.text },
+        speechSegments = finalSegments,
     )
+}
+
+internal fun naturalPhraseIntroduction(languageTag: String): String =
+    when (languageTag.substringBefore('-').lowercase()) {
+        "ru" -> "Такая фраза звучала бы естественнее:"
+        "de" -> "Natürlicher würde dieser Satz so klingen:"
+        "es" -> "Una forma más natural de decirlo sería:"
+        "fr" -> "Une façon plus naturelle de le dire serait :"
+        "it" -> "Un modo più naturale per dirlo sarebbe:"
+        "kk" -> "Бұл сөйлем табиғи түрде былай айтылады:"
+        "zh" -> "更自然的说法是："
+        else -> "A more natural way to say this is:"
+    }
 
 private fun String.trimForTutorOutput(): String =
     trim(' ', '\t', '\r', '\n', '"', '\'', '“', '”')

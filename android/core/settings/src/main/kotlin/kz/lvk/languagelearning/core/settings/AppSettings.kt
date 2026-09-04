@@ -51,11 +51,20 @@ enum class LearningLevel {
     C1,
 }
 
+enum class TutorExplanationLanguage {
+    Native,
+    Target,
+}
+
 data class AppSettings(
     val nativeLanguageTag: String = LanguageCatalog.Russian.tag,
     val targetLanguageTag: String = LanguageCatalog.English.tag,
     val learningLevel: LearningLevel = LearningLevel.A1,
     val userDisplayName: String? = null,
+    val includePhraseAnalysis: Boolean = true,
+    val includeNaturalPhrase: Boolean = true,
+    val includeConversationReply: Boolean = true,
+    val tutorExplanationLanguage: TutorExplanationLanguage = TutorExplanationLanguage.Native,
     val ttsVoiceIdsByLanguage: Map<String, String> = emptyMap(),
     val explanationTtsVoiceIdsByLanguage: Map<String, String> = emptyMap(),
 ) {
@@ -68,7 +77,13 @@ data class AppSettings(
     val targetVoiceId: String?
         get() = ttsVoiceIdsByLanguage[targetLanguageTag]
 
+    val explanationLanguage: AppLanguage
+        get() = when (tutorExplanationLanguage) {
+            TutorExplanationLanguage.Native -> nativeLanguage
+            TutorExplanationLanguage.Target -> targetLanguage
+        }
+
     val explanationVoiceId: String?
-        get() = explanationTtsVoiceIdsByLanguage[nativeLanguageTag]
-            ?: ttsVoiceIdsByLanguage[nativeLanguageTag]
+        get() = explanationTtsVoiceIdsByLanguage[explanationLanguage.tag]
+            ?: ttsVoiceIdsByLanguage[explanationLanguage.tag]
 }

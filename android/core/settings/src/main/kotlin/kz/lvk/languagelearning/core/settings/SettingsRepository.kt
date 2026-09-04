@@ -13,6 +13,10 @@ interface SettingsRepository {
     fun setTargetLanguage(language: AppLanguage)
     fun setLearningLevel(level: LearningLevel)
     fun setUserDisplayName(name: String?)
+    fun setPhraseAnalysisEnabled(enabled: Boolean)
+    fun setNaturalPhraseEnabled(enabled: Boolean)
+    fun setConversationReplyEnabled(enabled: Boolean)
+    fun setTutorExplanationLanguage(language: TutorExplanationLanguage)
     fun setTtsVoice(language: AppLanguage, voiceId: String?)
     fun setExplanationTtsVoice(language: AppLanguage, voiceId: String?)
 }
@@ -62,6 +66,31 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
             }
         }.apply()
         _settings.update { it.copy(userDisplayName = normalizedName) }
+    }
+
+    override fun setPhraseAnalysisEnabled(enabled: Boolean) {
+        updateResponseOption(KEY_INCLUDE_PHRASE_ANALYSIS, enabled) { current ->
+            current.copy(includePhraseAnalysis = enabled)
+        }
+    }
+
+    override fun setNaturalPhraseEnabled(enabled: Boolean) {
+        updateResponseOption(KEY_INCLUDE_NATURAL_PHRASE, enabled) { current ->
+            current.copy(includeNaturalPhrase = enabled)
+        }
+    }
+
+    override fun setConversationReplyEnabled(enabled: Boolean) {
+        updateResponseOption(KEY_INCLUDE_CONVERSATION_REPLY, enabled) { current ->
+            current.copy(includeConversationReply = enabled)
+        }
+    }
+
+    override fun setTutorExplanationLanguage(language: TutorExplanationLanguage) {
+        preferences.edit()
+            .putString(KEY_TUTOR_EXPLANATION_LANGUAGE, language.name)
+            .apply()
+        _settings.update { it.copy(tutorExplanationLanguage = language) }
     }
 
     override fun setTtsVoice(language: AppLanguage, voiceId: String?) {
@@ -129,6 +158,19 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
 
+        var includePhraseAnalysis = preferences.getBoolean(KEY_INCLUDE_PHRASE_ANALYSIS, true)
+        var includeNaturalPhrase = preferences.getBoolean(KEY_INCLUDE_NATURAL_PHRASE, true)
+        var includeConversationReply = preferences.getBoolean(KEY_INCLUDE_CONVERSATION_REPLY, true)
+        if (!includePhraseAnalysis && !includeNaturalPhrase && !includeConversationReply) {
+            includeConversationReply = true
+        }
+        val tutorExplanationLanguage = preferences
+            .getString(KEY_TUTOR_EXPLANATION_LANGUAGE, TutorExplanationLanguage.Native.name)
+            ?.let { saved ->
+                runCatching { TutorExplanationLanguage.valueOf(saved) }.getOrNull()
+            }
+            ?: TutorExplanationLanguage.Native
+
         val voices = LanguageCatalog.all.mapNotNull { language ->
             preferences.getString(voicePreferenceKey(language.tag), null)
                 ?.takeIf { it.isNotBlank() }
@@ -146,6 +188,10 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
             targetLanguageTag = targetTag,
             learningLevel = level,
             userDisplayName = userDisplayName,
+            includePhraseAnalysis = includePhraseAnalysis,
+            includeNaturalPhrase = includeNaturalPhrase,
+            includeConversationReply = includeConversationReply,
+            tutorExplanationLanguage = tutorExplanationLanguage,
             ttsVoiceIdsByLanguage = voices,
             explanationTtsVoiceIdsByLanguage = explanationVoices,
         )
@@ -183,12 +229,34 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
     private fun explanationVoicePreferenceKey(languageTag: String): String =
         "$KEY_EXPLANATION_TTS_VOICE_PREFIX$languageTag"
 
+    private fun updateResponseOption(
+        key: String,
+        enabled: Boolean,
+        transform: (AppSettings) -> AppSettings,
+    ) {
+        val updated = transform(_settings.value)
+        if (
+            !updated.includePhraseAnalysis &&
+            !updated.includeNaturalPhrase &&
+            !updated.includeConversationReply
+        ) {
+            return
+        }
+
+        preferences.edit().putBoolean(key, enabled).apply()
+        _settings.value = updated
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "language_learning_app_settings"
         const val KEY_NATIVE_LANGUAGE = "native_language_tag"
         const val KEY_TARGET_LANGUAGE = "target_language_tag"
         const val KEY_LEARNING_LEVEL = "learning_level"
         const val KEY_USER_DISPLAY_NAME = "user_display_name"
+        const val KEY_INCLUDE_PHRASE_ANALYSIS = "include_phrase_analysis"
+        const val KEY_INCLUDE_NATURAL_PHRASE = "include_natural_phrase"
+        const val KEY_INCLUDE_CONVERSATION_REPLY = "include_conversation_reply"
+        const val KEY_TUTOR_EXPLANATION_LANGUAGE = "tutor_explanation_language"
         const val KEY_TTS_VOICE_PREFIX = "tts_voice_"
         const val KEY_EXPLANATION_TTS_VOICE_PREFIX = "explanation_tts_voice_"
         const val LEGACY_TTS_PREFERENCES_NAME = "language_learning_system_tts"

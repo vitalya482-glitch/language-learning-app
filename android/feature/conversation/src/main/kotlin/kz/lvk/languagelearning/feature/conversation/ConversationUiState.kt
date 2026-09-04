@@ -13,7 +13,18 @@ data class ConversationMessage(
     val text: String,
     val role: ConversationRole,
     val spokenText: String? = null,
+    val speechSegments: List<ConversationSpeechSegment> = emptyList(),
 )
+
+data class ConversationSpeechSegment(
+    val text: String,
+    val language: ConversationSpeechLanguage,
+)
+
+enum class ConversationSpeechLanguage {
+    Explanation,
+    Target,
+}
 
 enum class ConversationRole {
     User,

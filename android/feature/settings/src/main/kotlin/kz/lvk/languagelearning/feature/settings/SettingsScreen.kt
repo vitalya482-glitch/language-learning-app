@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +45,7 @@ import kz.lvk.languagelearning.core.settings.AppSettings
 import kz.lvk.languagelearning.core.settings.DeviceDisplayName
 import kz.lvk.languagelearning.core.settings.LanguageCatalog
 import kz.lvk.languagelearning.core.settings.LearningLevel
+import kz.lvk.languagelearning.core.settings.TutorExplanationLanguage
 import kz.lvk.languagelearning.core.speech.AndroidSystemTextToSpeech
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
 import kz.lvk.languagelearning.core.speech.SystemTextToSpeechState
@@ -58,6 +60,10 @@ fun SettingsScreen(
     onNativeLanguageChange: (AppLanguage) -> Unit,
     onTargetLanguageChange: (AppLanguage) -> Unit,
     onLearningLevelChange: (LearningLevel) -> Unit,
+    onPhraseAnalysisEnabledChange: (Boolean) -> Unit,
+    onNaturalPhraseEnabledChange: (Boolean) -> Unit,
+    onConversationReplyEnabledChange: (Boolean) -> Unit,
+    onTutorExplanationLanguageChange: (TutorExplanationLanguage) -> Unit,
     onTtsVoiceChange: (AppLanguage, String?) -> Unit,
     onExplanationTtsVoiceChange: (AppLanguage, String?) -> Unit,
 ) {
@@ -86,11 +92,12 @@ fun SettingsScreen(
 
     val targetLanguage = appSettings.targetLanguage
     val nativeLanguage = appSettings.nativeLanguage
+    val explanationLanguage = appSettings.explanationLanguage
     val targetSpeechLanguage = remember(targetLanguage.tag) {
         SpeechLanguage(targetLanguage.tag)
     }
-    val nativeSpeechLanguage = remember(nativeLanguage.tag) {
-        SpeechLanguage(nativeLanguage.tag)
+    val explanationSpeechLanguage = remember(explanationLanguage.tag) {
+        SpeechLanguage(explanationLanguage.tag)
     }
     val preferredTargetVoiceId = appSettings.targetVoiceId
     val preferredExplanationVoiceId = appSettings.explanationVoiceId
@@ -103,15 +110,15 @@ fun SettingsScreen(
     val targetPreviewText = remember(targetLanguage.tag, previewName) {
         buildVoicePreviewText(targetLanguage, previewName)
     }
-    val explanationPreviewText = remember(nativeLanguage.tag, previewName) {
-        buildVoicePreviewText(nativeLanguage, previewName)
+    val explanationPreviewText = remember(explanationLanguage.tag, previewName) {
+        buildVoicePreviewText(explanationLanguage, previewName)
     }
 
     LaunchedEffect(targetLanguage.tag, preferredTargetVoiceId) {
         targetTts.prepare(targetSpeechLanguage, preferredTargetVoiceId)
     }
-    LaunchedEffect(nativeLanguage.tag, preferredExplanationVoiceId) {
-        explanationTts.prepare(nativeSpeechLanguage, preferredExplanationVoiceId)
+    LaunchedEffect(explanationLanguage.tag, preferredExplanationVoiceId) {
+        explanationTts.prepare(explanationSpeechLanguage, preferredExplanationVoiceId)
     }
 
     DisposableEffect(targetTts, explanationTts) {
@@ -130,9 +137,9 @@ fun SettingsScreen(
 
     fun selectAndPreviewExplanationVoice(voiceId: String) {
         targetTts.stop()
-        explanationTts.selectVoice(nativeSpeechLanguage, voiceId)
-        onExplanationTtsVoiceChange(nativeLanguage, voiceId)
-        explanationTts.speak(explanationPreviewText, nativeSpeechLanguage)
+        explanationTts.selectVoice(explanationSpeechLanguage, voiceId)
+        onExplanationTtsVoiceChange(explanationLanguage, voiceId)
+        explanationTts.speak(explanationPreviewText, explanationSpeechLanguage)
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -194,6 +201,73 @@ fun SettingsScreen(
                     optionText = { it.name },
                     onSelected = onLearningLevelChange,
                 )
+
+                Spacer(Modifier.height(28.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(28.dp))
+
+                Text(
+                    text = stringResource(R.string.settings_tutor_response_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.settings_tutor_response_note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+
+                val selectedResponseOptionCount = listOf(
+                    appSettings.includePhraseAnalysis,
+                    appSettings.includeNaturalPhrase,
+                    appSettings.includeConversationReply,
+                ).count { it }
+                ResponseOptionRow(
+                    checked = appSettings.includePhraseAnalysis,
+                    enabled = !appSettings.includePhraseAnalysis || selectedResponseOptionCount > 1,
+                    title = stringResource(R.string.settings_response_analysis),
+                    description = stringResource(R.string.settings_response_analysis_note),
+                    onCheckedChange = onPhraseAnalysisEnabledChange,
+                )
+                ResponseOptionRow(
+                    checked = appSettings.includeNaturalPhrase,
+                    enabled = !appSettings.includeNaturalPhrase || selectedResponseOptionCount > 1,
+                    title = stringResource(R.string.settings_response_natural_phrase),
+                    description = stringResource(R.string.settings_response_natural_phrase_note),
+                    onCheckedChange = onNaturalPhraseEnabledChange,
+                )
+                ResponseOptionRow(
+                    checked = appSettings.includeConversationReply,
+                    enabled = !appSettings.includeConversationReply || selectedResponseOptionCount > 1,
+                    title = stringResource(R.string.settings_response_reply),
+                    description = stringResource(R.string.settings_response_reply_note),
+                    onCheckedChange = onConversationReplyEnabledChange,
+                )
+
+                if (appSettings.includePhraseAnalysis || appSettings.includeNaturalPhrase) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.settings_explanation_language),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    ExplanationLanguageRow(
+                        selected = appSettings.tutorExplanationLanguage ==
+                            TutorExplanationLanguage.Native,
+                        label = nativeLanguage.displayName(),
+                        onSelect = {
+                            onTutorExplanationLanguageChange(TutorExplanationLanguage.Native)
+                        },
+                    )
+                    ExplanationLanguageRow(
+                        selected = appSettings.tutorExplanationLanguage ==
+                            TutorExplanationLanguage.Target,
+                        label = targetLanguage.displayName(),
+                        onSelect = {
+                            onTutorExplanationLanguageChange(TutorExplanationLanguage.Target)
+                        },
+                    )
+                }
 
                 Spacer(Modifier.height(28.dp))
                 HorizontalDivider()
@@ -282,7 +356,7 @@ fun SettingsScreen(
                 Text(
                     text = stringResource(
                         R.string.settings_voice_language,
-                        nativeLanguage.displayName(),
+                        explanationLanguage.displayName(),
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -296,6 +370,59 @@ fun SettingsScreen(
                 onSelectVoice = ::selectAndPreviewExplanationVoice,
             )
         }
+    }
+}
+
+@Composable
+private fun ResponseOptionRow(
+    checked: Boolean,
+    enabled: Boolean,
+    title: String,
+    description: String,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp),
+        ) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExplanationLanguageRow(
+    selected: Boolean,
+    label: String,
+    onSelect: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Text(text = label, modifier = Modifier.padding(start = 8.dp))
     }
 }
 

@@ -5,6 +5,15 @@
     <string name="settings_native_language">Native language</string>
     <string name="settings_target_language">Learning language</string>
     <string name="settings_learning_level">Level</string>
+    <string name="settings_tutor_response_title">AI response</string>
+    <string name="settings_tutor_response_note">Choose what the tutor includes. At least one item must remain enabled.</string>
+    <string name="settings_response_analysis">Phrase analysis</string>
+    <string name="settings_response_analysis_note">Meaning, grammar, and word-choice feedback.</string>
+    <string name="settings_response_natural_phrase">Natural phrase example</string>
+    <string name="settings_response_natural_phrase_note">A more natural version in the learning language.</string>
+    <string name="settings_response_reply">Conversation reply</string>
+    <string name="settings_response_reply_note">A direct answer and a relevant follow-up question.</string>
+    <string name="settings_explanation_language">Language for analysis and explanations</string>
     <string name="settings_models_title">Local AI models</string>
     <string name="settings_models_note">Download and manage local models separately from the application.</string>
     <string name="settings_models_open">Open model manager</string>
@@ -13,7 +22,7 @@
     <string name="settings_voice_preview_note">Tap a voice to select it and hear a short preview.</string>
     <string name="settings_target_voice_title">Learning language voice</string>
     <string name="settings_explanation_voice_title">Explanation voice</string>
-    <string name="settings_explanation_voice_note">Used for explanations in the learner\'s native language.</string>
+    <string name="settings_explanation_voice_note">Used for analysis and the introduction before a natural phrase.</string>
     <string name="settings_voice_language">Language: %1$s</string>
     <string name="settings_voice_loading">Loading system voices…</string>
     <string name="settings_voice_none">No system voices are available for this language.</string>

@@ -16,6 +16,8 @@
     <string name="conversation_view_dialog">Посмотреть диалог</string>
     <string name="conversation_dialog_title">Диалог</string>
     <string name="conversation_close_dialog">Закрыть</string>
+    <string name="conversation_dialog_copy">Скопировать диалог</string>
+    <string name="conversation_dialog_copied">Скопировано</string>
     <string name="speech_talk_button">Говорить</string>
     <string name="speech_listening_button">Слушаю…</string>
     <string name="speech_input_language">Микрофон:</string>

@@ -5,6 +5,15 @@
     <string name="settings_native_language">Родной язык</string>
     <string name="settings_target_language">Изучаемый язык</string>
     <string name="settings_learning_level">Уровень</string>
+    <string name="settings_tutor_response_title">Ответ ИИ</string>
+    <string name="settings_tutor_response_note">Выберите, из чего состоит ответ преподавателя. Хотя бы один пункт должен быть включён.</string>
+    <string name="settings_response_analysis">Результат проверки и разбора фразы</string>
+    <string name="settings_response_analysis_note">Смысл, грамматика и выбор слов.</string>
+    <string name="settings_response_natural_phrase">Пример естественной фразы</string>
+    <string name="settings_response_natural_phrase_note">Более естественный вариант на изучаемом языке.</string>
+    <string name="settings_response_reply">Ответ для продолжения диалога</string>
+    <string name="settings_response_reply_note">Прямой ответ и уместный встречный вопрос.</string>
+    <string name="settings_explanation_language">Язык разбора и пояснений</string>
     <string name="settings_models_title">Локальные AI-модели</string>
     <string name="settings_models_note">Скачивание и управление локальными моделями отдельно от приложения.</string>
     <string name="settings_models_open">Открыть менеджер моделей</string>
@@ -13,7 +22,7 @@
     <string name="settings_voice_preview_note">Нажмите на голос, чтобы выбрать его и сразу услышать короткий пример.</string>
     <string name="settings_target_voice_title">Голос изучаемого языка</string>
     <string name="settings_explanation_voice_title">Голос объяснений</string>
-    <string name="settings_explanation_voice_note">Используется для объяснений на родном языке ученика.</string>
+    <string name="settings_explanation_voice_note">Используется для разбора и вводной фразы перед естественным вариантом.</string>
     <string name="settings_voice_language">Язык: %1$s</string>
     <string name="settings_voice_loading">Загружаем список системных голосов…</string>
     <string name="settings_voice_none">Для этого языка системные голоса не найдены.</string>

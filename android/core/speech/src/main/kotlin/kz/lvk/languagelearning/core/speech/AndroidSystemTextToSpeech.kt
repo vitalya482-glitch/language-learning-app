@@ -134,11 +134,22 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
         }
     }
 
-    fun speak(text: String, language: SpeechLanguage = currentLanguage): String? {
+    fun speak(
+        text: String,
+        language: SpeechLanguage = currentLanguage,
+        voiceId: String? = null,
+    ): String? {
         if (text.isBlank()) return null
 
-        if (language.tag != currentLanguage.tag || _state.value.languageTag != language.tag) {
-            prepare(language, preferredVoiceId)
+        val requestedVoiceId = voiceId ?: preferredVoiceId.takeIf {
+            language.tag == currentLanguage.tag
+        }
+        if (
+            language.tag != currentLanguage.tag ||
+            _state.value.languageTag != language.tag ||
+            (requestedVoiceId != null && _state.value.selectedVoiceId != requestedVoiceId)
+        ) {
+            prepare(language, requestedVoiceId)
         }
 
         val activeEngine = engine

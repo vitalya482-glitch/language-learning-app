@@ -60,21 +60,56 @@ class ConversationResponseParserTest {
     }
 
     @Test
-    fun `composes and speaks both analysis and reply`() {
+    fun `composes enabled sections and preserves speech languages`() {
         val result = composeTutorResponse(
-            analysis = "A natural version is: Do you know the band Guns N' Roses?",
+            analysis = "Use 'Do you know' when asking whether someone is familiar with a band.",
+            naturalPhrase = "Do you know the band Guns N' Roses?",
             reply = "Yes. They are an American rock band. What is your favorite song?",
+            naturalPhraseIntroduction = "Такая фраза звучала бы естественнее:",
         )
 
         assertEquals(
-            "Analysis: A natural version is: Do you know the band Guns N' Roses?\n\n" +
-                "Reply: Yes. They are an American rock band. What is your favorite song?",
+            "Use 'Do you know' when asking whether someone is familiar with a band.\n\n" +
+                "Такая фраза звучала бы естественнее:\n" +
+                "Do you know the band Guns N' Roses?\n\n" +
+                "Yes. They are an American rock band. What is your favorite song?",
             result.visibleText,
         )
+        assertEquals(4, result.speechSegments.size)
         assertEquals(
-            "A natural version is: Do you know the band Guns N' Roses?\n\n" +
-                "Yes. They are an American rock band. What is your favorite song?",
-            result.spokenText,
+            ConversationSpeechLanguage.Explanation,
+            result.speechSegments[0].language,
+        )
+        assertEquals(
+            ConversationSpeechLanguage.Target,
+            result.speechSegments[2].language,
+        )
+    }
+
+    @Test
+    fun `composes only selected sections`() {
+        val result = composeTutorResponse(
+            analysis = null,
+            naturalPhrase = null,
+            reply = "Yes, I know them. Which song do you like?",
+            naturalPhraseIntroduction = "A more natural way to say this is:",
+        )
+
+        assertEquals("Yes, I know them. Which song do you like?", result.visibleText)
+        assertEquals(1, result.speechSegments.size)
+        assertEquals(ConversationSpeechLanguage.Target, result.speechSegments.single().language)
+    }
+
+    @Test
+    fun `formats the complete dialog for debugging`() {
+        val messages = listOf(
+            ConversationMessage(1, "How are you?", ConversationRole.User),
+            ConversationMessage(2, "I'm well.", ConversationRole.Assistant),
+        )
+
+        assertEquals(
+            "USER:\nHow are you?\n\nAI TUTOR:\nI'm well.",
+            formatConversationForClipboard(messages),
         )
     }
 }

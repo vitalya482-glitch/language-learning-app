@@ -55,6 +55,14 @@ class MainActivity : ComponentActivity() {
                             append('-')
                             append(appSettings.learningLevel.name)
                             append('-')
+                            append(appSettings.includePhraseAnalysis)
+                            append('-')
+                            append(appSettings.includeNaturalPhrase)
+                            append('-')
+                            append(appSettings.includeConversationReply)
+                            append('-')
+                            append(appSettings.tutorExplanationLanguage.name)
+                            append('-')
                             append(modelPath?.hashCode() ?: 0)
                         }
                         val conversationViewModel: ConversationViewModel = viewModel(
@@ -65,6 +73,10 @@ class MainActivity : ComponentActivity() {
                                 nativeLanguageTag = appSettings.nativeLanguageTag,
                                 targetLanguageTag = appSettings.targetLanguageTag,
                                 learningLevel = appSettings.learningLevel.name,
+                                includePhraseAnalysis = appSettings.includePhraseAnalysis,
+                                includeNaturalPhrase = appSettings.includeNaturalPhrase,
+                                includeConversationReply = appSettings.includeConversationReply,
+                                explanationLanguageTag = appSettings.explanationLanguage.tag,
                             ),
                         )
                         val conversationState by conversationViewModel.state.collectAsStateWithLifecycle()
@@ -77,7 +89,11 @@ class MainActivity : ComponentActivity() {
                             onRetryEngine = conversationViewModel::loadEngine,
                             speechLanguage = targetSpeechLanguage,
                             nativeSpeechLanguage = nativeSpeechLanguage,
+                            explanationSpeechLanguage = SpeechLanguage(
+                                appSettings.explanationLanguage.tag,
+                            ),
                             ttsVoiceId = appSettings.targetVoiceId,
+                            explanationTtsVoiceId = appSettings.explanationVoiceId,
                         )
                     }
 
@@ -90,6 +106,14 @@ class MainActivity : ComponentActivity() {
                             onNativeLanguageChange = app.container.settingsRepository::setNativeLanguage,
                             onTargetLanguageChange = app.container.settingsRepository::setTargetLanguage,
                             onLearningLevelChange = app.container.settingsRepository::setLearningLevel,
+                            onPhraseAnalysisEnabledChange =
+                                app.container.settingsRepository::setPhraseAnalysisEnabled,
+                            onNaturalPhraseEnabledChange =
+                                app.container.settingsRepository::setNaturalPhraseEnabled,
+                            onConversationReplyEnabledChange =
+                                app.container.settingsRepository::setConversationReplyEnabled,
+                            onTutorExplanationLanguageChange =
+                                app.container.settingsRepository::setTutorExplanationLanguage,
                             onTtsVoiceChange = app.container.settingsRepository::setTtsVoice,
                             onExplanationTtsVoiceChange = app.container.settingsRepository::setExplanationTtsVoice,
                         )

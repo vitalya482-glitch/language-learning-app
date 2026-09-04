@@ -1,6 +1,8 @@
 package kz.lvk.languagelearning.feature.conversation
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.speech.SpeechRecognizer
@@ -71,7 +73,9 @@ fun ConversationScreen(
     onRetryEngine: () -> Unit,
     speechLanguage: SpeechLanguage = SpeechLanguages.English,
     nativeSpeechLanguage: SpeechLanguage = speechLanguage,
+    explanationSpeechLanguage: SpeechLanguage = nativeSpeechLanguage,
     ttsVoiceId: String? = null,
+    explanationTtsVoiceId: String? = null,
 ) {
     var input by remember { mutableStateOf("") }
     var microphonePermissionDenied by remember { mutableStateOf(false) }
@@ -80,11 +84,13 @@ fun ConversationScreen(
     }
     var voiceFeedbackEnabled by rememberSaveable { mutableStateOf(false) }
     var flowModeEnabled by remember { mutableStateOf(false) }
-    var flowReplyUtteranceId by remember { mutableStateOf<String?>(null) }
     var showConversationViewer by rememberSaveable { mutableStateOf(false) }
     var lastAutoSpokenMessageId by remember { mutableStateOf<Long?>(null) }
     var generationElapsedMs by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
+    val clipboardManager = remember(context) {
+        context.getSystemService(ClipboardManager::class.java)
+    }
     val speechRecognizer = remember(context) {
         AndroidOnDeviceSpeechRecognizer(context.applicationContext)
     }
@@ -118,26 +124,58 @@ fun ConversationScreen(
     LaunchedEffect(
         voiceFeedbackEnabled,
         lastAssistantMessage?.id,
-        lastAssistantMessage?.spokenText,
-        ttsState.isReady,
         flowModeEnabled,
+        speechLanguage.tag,
+        explanationSpeechLanguage.tag,
+        ttsVoiceId,
+        explanationTtsVoiceId,
     ) {
         val message = lastAssistantMessage
-        val spokenText = message?.spokenText
         if (
             voiceFeedbackEnabled &&
-            ttsState.isReady &&
             message != null &&
-            message.id != lastAutoSpokenMessageId &&
-            !spokenText.isNullOrBlank()
+            message.id != lastAutoSpokenMessageId
         ) {
-            val utteranceId = systemTts.speak(spokenText, speechLanguage)
-            if (utteranceId != null) {
-                lastAutoSpokenMessageId = message.id
-                if (flowModeEnabled) {
-                    flowReplyUtteranceId = utteranceId
+            lastAutoSpokenMessageId = message.id
+            val speechSegments = message.speechSegments.ifEmpty {
+                message.spokenText
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { text ->
+                        listOf(
+                            ConversationSpeechSegment(
+                                text = text,
+                                language = ConversationSpeechLanguage.Target,
+                            ),
+                        )
+                    }
+                    .orEmpty()
+            }
+
+            speechSegments.forEach { segment ->
+                val isExplanation =
+                    segment.language == ConversationSpeechLanguage.Explanation
+                val segmentLanguage = if (isExplanation) {
+                    explanationSpeechLanguage
+                } else {
+                    speechLanguage
                 }
-            } else if (flowModeEnabled) {
+                val segmentVoiceId = if (isExplanation) {
+                    explanationTtsVoiceId
+                } else {
+                    ttsVoiceId
+                }
+                val utteranceId = systemTts.speak(
+                    text = segment.text,
+                    language = segmentLanguage,
+                    voiceId = segmentVoiceId,
+                )
+                if (utteranceId != null) {
+                    waitForUtteranceOrTimeout(systemTts, utteranceId, segment.text.length)
+                    delay(TTS_SEGMENT_PAUSE_MS)
+                }
+            }
+
+            if (flowModeEnabled) {
                 delay(FLOW_RESTART_DELAY_MS)
                 if (!state.isGenerating) {
                     speechRecognizer.startListening(activeSpeechLanguage)
@@ -163,26 +201,6 @@ fun ConversationScreen(
         }
     }
 
-    LaunchedEffect(
-        flowModeEnabled,
-        flowReplyUtteranceId,
-        ttsState.lastFinishedUtteranceId,
-    ) {
-        val replyUtteranceId = flowReplyUtteranceId
-        if (
-            flowModeEnabled &&
-            replyUtteranceId != null &&
-            replyUtteranceId == ttsState.lastFinishedUtteranceId
-        ) {
-            delay(FLOW_RESTART_DELAY_MS)
-            val latestSpeechState = speechRecognizer.state.value
-            if (!latestSpeechState.isListening && !latestSpeechState.isFinalizing) {
-                speechRecognizer.startListening(activeSpeechLanguage)
-            }
-            flowReplyUtteranceId = null
-        }
-    }
-
     LaunchedEffect(flowModeEnabled, speechState.errorCode) {
         val retryableError = speechState.errorCode in setOf(
             SpeechRecognizer.ERROR_NO_MATCH,
@@ -198,7 +216,6 @@ fun ConversationScreen(
     LaunchedEffect(flowModeEnabled, state.errorMessage) {
         if (flowModeEnabled && state.errorMessage != null) {
             flowModeEnabled = false
-            flowReplyUtteranceId = null
             speechRecognizer.stopListening()
             systemTts.stop()
         }
@@ -326,7 +343,6 @@ fun ConversationScreen(
                 onToggleFlowMode = {
                     if (flowModeEnabled) {
                         flowModeEnabled = false
-                        flowReplyUtteranceId = null
                         speechRecognizer.stopListening()
                         systemTts.stop()
                     } else {
@@ -334,7 +350,6 @@ fun ConversationScreen(
                         lastAutoSpokenMessageId = lastAssistantMessage?.id
                         flowModeEnabled = true
                         voiceFeedbackEnabled = true
-                        flowReplyUtteranceId = null
 
                         if (!state.isGenerating) {
                             systemTts.stop()
@@ -352,7 +367,6 @@ fun ConversationScreen(
                 },
                 onUseTextFeedback = {
                     voiceFeedbackEnabled = false
-                    flowReplyUtteranceId = null
                     systemTts.stop()
                 },
                 onUseVoiceFeedback = {
@@ -440,6 +454,14 @@ fun ConversationScreen(
             isGenerating = state.isGenerating,
             generationPhase = state.generationPhase,
             generationElapsedMs = generationElapsedMs,
+            onCopy = {
+                clipboardManager.setPrimaryClip(
+                    ClipData.newPlainText(
+                        "Language Learning dialog",
+                        formatConversationForClipboard(state.messages),
+                    ),
+                )
+            },
             onDismiss = { showConversationViewer = false },
         )
     }
@@ -849,8 +871,28 @@ private fun generationStatusText(
     return stringResource(resourceId, formatRecordingDuration(elapsedMs))
 }
 
-private const val FLOW_RESTART_DELAY_MS = 350L
+private const val FLOW_RESTART_DELAY_MS = 700L
 private const val FLOW_RETRY_DELAY_MS = 700L
+private const val TTS_SEGMENT_PAUSE_MS = 160L
+
+private suspend fun waitForUtteranceOrTimeout(
+    systemTts: AndroidSystemTextToSpeech,
+    utteranceId: String,
+    characterCount: Int,
+) {
+    val timeoutMs = (4_000L + characterCount * 90L).coerceIn(8_000L, 120_000L)
+    val startedAt = SystemClock.elapsedRealtime()
+    while (SystemClock.elapsedRealtime() - startedAt < timeoutMs) {
+        val current = systemTts.state.value
+        if (!current.isSpeaking || current.activeUtteranceId != utteranceId) return
+        delay(100L)
+    }
+
+    val current = systemTts.state.value
+    if (current.isSpeaking && current.activeUtteranceId == utteranceId) {
+        systemTts.stop()
+    }
+}
 
 @Composable
 private fun ConversationViewerDialog(
@@ -858,9 +900,18 @@ private fun ConversationViewerDialog(
     isGenerating: Boolean,
     generationPhase: ConversationGenerationPhase?,
     generationElapsedMs: Long,
+    onCopy: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val listState = rememberLazyListState()
+    var copied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2_000L)
+            copied = false
+        }
+    }
 
     LaunchedEffect(messages.size, isGenerating) {
         val lastItemIndex = messages.lastIndex + if (isGenerating) 1 else 0
@@ -897,6 +948,24 @@ private fun ConversationViewerDialog(
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        onCopy()
+                        copied = true
+                    },
+                    enabled = messages.isNotEmpty(),
+                ) {
+                    Text(
+                        stringResource(
+                            if (copied) {
+                                R.string.conversation_dialog_copied
+                            } else {
+                                R.string.conversation_dialog_copy
+                            },
+                        ),
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 LazyColumn(
                     state = listState,
@@ -929,6 +998,15 @@ private fun ConversationViewerDialog(
         }
     }
 }
+
+internal fun formatConversationForClipboard(messages: List<ConversationMessage>): String =
+    messages.joinToString(separator = "\n\n") { message ->
+        val role = when (message.role) {
+            ConversationRole.User -> "USER"
+            ConversationRole.Assistant -> "AI TUTOR"
+        }
+        "$role:\n${message.text.trim()}"
+    }
 
 @Composable
 private fun ConversationMessageBubble(message: ConversationMessage) {
