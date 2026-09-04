@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,6 +52,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
 import kotlinx.coroutines.delay
@@ -75,6 +79,7 @@ fun ConversationScreen(
         mutableStateOf(false)
     }
     var voiceFeedbackEnabled by rememberSaveable { mutableStateOf(false) }
+    var showConversationViewer by rememberSaveable { mutableStateOf(false) }
     var lastAutoSpokenMessageId by remember { mutableStateOf<Long?>(null) }
     var generationElapsedMs by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
@@ -224,6 +229,15 @@ fun ConversationScreen(
                 }
             }
 
+            if (state.messages.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = { showConversationViewer = true },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(stringResource(R.string.conversation_view_dialog))
+                }
+            }
+
             SpeechInputControl(
                 speechState = speechState,
                 languageDisplayName = activeSpeechLanguageDisplayName,
@@ -312,6 +326,15 @@ fun ConversationScreen(
                 Text(stringResource(R.string.conversation_send))
             }
         }
+    }
+
+    if (showConversationViewer) {
+        ConversationViewerDialog(
+            messages = state.messages,
+            isGenerating = state.isGenerating,
+            generationElapsedMs = generationElapsedMs,
+            onDismiss = { showConversationViewer = false },
+        )
     }
 }
 
@@ -633,6 +656,83 @@ private fun formatRecordingDuration(elapsedMs: Long): String {
     val minutes = totalSeconds / 60L
     val seconds = totalSeconds % 60L
     return String.format(Locale.US, "%02d:%02d", minutes, seconds)
+}
+
+@Composable
+private fun ConversationViewerDialog(
+    messages: List<ConversationMessage>,
+    isGenerating: Boolean,
+    generationElapsedMs: Long,
+    onDismiss: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size, isGenerating) {
+        val lastItemIndex = messages.lastIndex + if (isGenerating) 1 else 0
+        if (lastItemIndex >= 0) {
+            listState.scrollToItem(lastItemIndex)
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(20.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.conversation_close_dialog))
+                    }
+                    Text(
+                        text = stringResource(R.string.conversation_dialog_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(messages, key = { it.id }) { message ->
+                        ConversationMessageBubble(message)
+                    }
+                    if (isGenerating) {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                                Text(
+                                    text = stringResource(
+                                        R.string.conversation_generating,
+                                        formatRecordingDuration(generationElapsedMs),
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
