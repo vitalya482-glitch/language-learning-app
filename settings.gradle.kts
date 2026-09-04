@@ -26,7 +26,9 @@ include(
     ":android:core:ai-native",
     ":android:core:speech",
     ":android:core:settings",
+    ":android:core:models",
     ":android:feature:conversation",
     ":android:feature:home",
     ":android:feature:settings",
+    ":android:feature:models",
 )
