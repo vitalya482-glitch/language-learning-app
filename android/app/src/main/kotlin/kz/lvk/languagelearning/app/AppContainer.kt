@@ -3,6 +3,7 @@ package kz.lvk.languagelearning.app
 import android.content.Context
 import kz.lvk.languagelearning.core.ai.LanguageModelEngine
 import kz.lvk.languagelearning.core.ai.nativeengine.NativeLanguageModelEngine
+import kz.lvk.languagelearning.core.models.LocalModelManager
 import kz.lvk.languagelearning.core.network.JdkHttpClient
 import kz.lvk.languagelearning.core.settings.SettingsRepository
 import kz.lvk.languagelearning.core.settings.SharedPreferencesSettingsRepository
@@ -15,6 +16,7 @@ class AppContainer(context: Context) {
     private val updateRepository = LvkUpdateRepository(httpClient)
 
     val settingsRepository: SettingsRepository = SharedPreferencesSettingsRepository(appContext)
+    val localModelManager: LocalModelManager = LocalModelManager(appContext)
 
     val languageModelEngine: LanguageModelEngine by lazy {
         NativeLanguageModelEngine()
