@@ -16,7 +16,7 @@ namespace lvk::language_learning {
 namespace {
 
 constexpr int32_t kContextTokens = 2048;
-constexpr int32_t kMaxGeneratedTokens = 128;
+constexpr int32_t kMaxGeneratedTokens = 96;
 constexpr auto kMaxGenerationTime = std::chrono::seconds(25);
 
 int32_t inference_threads() {
@@ -252,8 +252,8 @@ std::string NativeAiEngine::generate(
         throw std::runtime_error("llama.cpp could not create a sampler");
     }
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_min_p(0.05f, 1));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(0.6f));
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(0.25f));
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(42));
 
     llama_batch batch = llama_batch_get_one(
         prompt_tokens.data(),

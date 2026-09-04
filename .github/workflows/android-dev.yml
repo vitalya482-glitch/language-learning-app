@@ -67,7 +67,7 @@ jobs:
           fi
 
       - name: Unit tests
-        run: ./gradlew :android:core:common:test
+        run: ./gradlew :android:core:common:test :android:feature:conversation:testDebugUnitTest
 
       - name: Build signed dev APK
         run: ./gradlew :android:app:assembleDevRelease

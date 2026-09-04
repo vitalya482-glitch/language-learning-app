@@ -160,6 +160,10 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
                     errorMessage = "Android Text-to-Speech could not start playback",
                 )
             }
+        } else {
+            // Reflect queued playback immediately. Some Android voices need a few seconds
+            // before onStart(), which otherwise makes a successful tap look ignored.
+            _state.update { it.copy(isSpeaking = true, errorMessage = null) }
         }
     }
 

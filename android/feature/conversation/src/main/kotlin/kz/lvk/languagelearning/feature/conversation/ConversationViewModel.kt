@@ -25,24 +25,12 @@ class ConversationViewModel(
     private var nextMessageId = 0L
 
     private val tutorSystemPrompt = """
-        You are a concise, friendly language tutor running fully offline on the learner's phone.
-        The learner's native language is $nativeLanguageTag.
-        The language being learned is $targetLanguageTag.
-        The learner's CEFR level is $learningLevel.
-
-        For each learner message:
-        - Always start with exactly one machine-readable TTS block in this format:
-          [[SPEAK]]one short natural reply or question in the target language[[/SPEAK]]
-        - The text inside [[SPEAK]] must contain only the phrase that should be spoken aloud in the target language.
-          Do not put explanations, translations, labels or quotation marks inside the TTS block.
-        - After the TTS block, if there is a mistake, show a corrected natural version in the target language.
-        - Briefly explain the important correction in the learner's native language.
-        - If useful, give one short translation or hint in the native language.
-        - Continue the visible feedback with the same short natural reply or question in the target language.
-        - If the learner writes in the native language, translate the intended phrase into the target language and continue.
-        - If the learner's phrase is already correct, say so briefly and continue.
-        - Keep the complete visible answer under about 80 words.
-        - Do not output hidden reasoning or a thinking section.
+        You are a friendly language tutor. The learner speaks $nativeLanguageTag and studies
+        $targetLanguageTag at CEFR level $learningLevel. First answer the learner directly in one
+        short, natural sentence in $targetLanguageTag. Never repeat the learner's question as your
+        answer. On the next line, briefly praise or correct the learner in $nativeLanguageTag.
+        If there is a mistake, show the correct $targetLanguageTag phrase. Use no headings, tags,
+        quotes, Markdown, or hidden reasoning. Keep everything under 45 words.
     """.trimIndent()
 
     init {
@@ -98,7 +86,7 @@ class ConversationViewModel(
                 engine.generate(
                     LanguageModelRequest(
                         systemPrompt = tutorSystemPrompt,
-                        userText = userText,
+                        userText = buildModelInput(currentState.messages, userText),
                     ),
                 )
             }.onSuccess { response ->
@@ -149,42 +137,100 @@ class ConversationViewModel(
     }
 }
 
-private data class ParsedTutorResponse(
+internal data class ParsedTutorResponse(
     val visibleText: String,
     val spokenText: String?,
 )
 
-private val ttsBlockRegex = Regex(
-    pattern = """(?s)\[\[SPEAK\]\](.*?)\[\[/SPEAK\]\]""",
+private val speakOpenMarkerRegex = Regex(
+    pattern = """(?i)\[\s*\[\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
 )
 
-private val legacySpokenReplyRegex = Regex(
-    pattern = """(?im)^\s*(?:short\s+reply|spoken\s+reply|reply)\s*:\s*[\"“]?(.+?)[\"”]?\s*$""",
+private val speakCloseMarkerRegex = Regex(
+    pattern = """(?i)\[\s*\[\s*/\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
 )
 
-private fun parseTutorResponse(rawText: String): ParsedTutorResponse {
-    val blockMatch = ttsBlockRegex.find(rawText)
-    val markerSpokenText = blockMatch
-        ?.groupValues
-        ?.getOrNull(1)
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
+private val anySpeakMarkerRegex = Regex(
+    pattern = """(?i)\[\s*\[\s*/?\s*SPEAK\s*\](?:\s*[\"”']?\s*\])?""",
+)
 
-    val legacySpokenText = legacySpokenReplyRegex
+private val spokenLineRegex = Regex(
+    pattern = """(?im)^\s*(?:say|speak|short\s+reply|spoken\s+reply|reply)\s*:\s*[\"“]?(.+?)[\"”]?\s*$""",
+)
+
+private val feedbackLabelRegex = Regex(
+    pattern = """(?im)^\s*(?:feedback|correction|explanation)\s*:\s*""",
+)
+
+internal fun parseTutorResponse(rawText: String): ParsedTutorResponse {
+    val openMarker = speakOpenMarkerRegex.find(rawText)
+    val closeMarker = openMarker?.let {
+        speakCloseMarkerRegex.find(rawText, it.range.last + 1)
+    }
+    val taggedSpokenText = openMarker?.let { open ->
+        val contentStart = open.range.last + 1
+        val contentEnd = closeMarker?.range?.first
+            ?: rawText.indexOf('\n', contentStart).takeIf { it >= 0 }
+            ?: rawText.length
+        rawText.substring(contentStart, contentEnd)
+            .trimForTutorOutput()
+            .takeIf { it.isNotBlank() }
+    }
+
+    val labelledSpokenText = spokenLineRegex
         .find(rawText)
         ?.groupValues
         ?.getOrNull(1)
-        ?.trim()
-        ?.trim('"', '“', '”')
+        ?.trimForTutorOutput()
         ?.takeIf { it.isNotBlank() }
 
-    val visibleText = rawText
-        .replace(ttsBlockRegex, "")
-        .trim()
-        .ifBlank { rawText.trim() }
+    val withoutTaggedBlock = if (openMarker != null && closeMarker != null) {
+        rawText.removeRange(openMarker.range.first, closeMarker.range.last + 1)
+    } else {
+        rawText.replace(anySpeakMarkerRegex, "")
+    }
+    val withoutProtocolLabels = withoutTaggedBlock
+        .replace(spokenLineRegex, "")
+        .replace(feedbackLabelRegex, "")
+        .replace(anySpeakMarkerRegex, "")
+        .trimForTutorOutput()
+
+    val explicitSpokenText = taggedSpokenText ?: labelledSpokenText
+    val spokenText = explicitSpokenText
+        ?: withoutProtocolLabels.lineSequence().firstOrNull { it.isNotBlank() }?.trimForTutorOutput()
+    val visibleText = buildList {
+        if (withoutProtocolLabels.isNotBlank()) add(withoutProtocolLabels)
+        if (!explicitSpokenText.isNullOrBlank() && none { it == explicitSpokenText }) {
+            add(explicitSpokenText)
+        }
+    }.joinToString("\n\n").ifBlank {
+        spokenText ?: "The local tutor did not return a readable answer."
+    }
 
     return ParsedTutorResponse(
         visibleText = visibleText,
-        spokenText = markerSpokenText ?: legacySpokenText,
+        spokenText = spokenText,
     )
+}
+
+private fun String.trimForTutorOutput(): String =
+    trim(' ', '\t', '\r', '\n', '"', '\'', '“', '”')
+
+private fun buildModelInput(
+    messages: List<ConversationMessage>,
+    userText: String,
+): String {
+    if (messages.isEmpty()) return userText
+
+    val recentConversation = messages.takeLast(6).joinToString("\n") { message ->
+        val role = if (message.role == ConversationRole.User) "Learner" else "Tutor"
+        "$role: ${message.text.replace('\n', ' ')}"
+    }
+    return """
+        Recent conversation:
+        $recentConversation
+
+        Current learner message:
+        $userText
+    """.trimIndent()
 }
