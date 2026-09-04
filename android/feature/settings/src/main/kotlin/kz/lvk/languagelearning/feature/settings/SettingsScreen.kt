@@ -51,6 +51,7 @@ import kz.lvk.languagelearning.feature.models.LocalModelsScreen
 @Composable
 fun SettingsScreen(
     appSettings: AppSettings,
+    localModelManager: LocalModelManager,
     onBack: () -> Unit,
     onNativeLanguageChange: (AppLanguage) -> Unit,
     onTargetLanguageChange: (AppLanguage) -> Unit,
@@ -59,9 +60,6 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     var showLocalModels by rememberSaveable { mutableStateOf(false) }
-    val localModelManager = remember(context) {
-        LocalModelManager(context.applicationContext)
-    }
     val localModelsState by localModelManager.state.collectAsStateWithLifecycle()
 
     if (showLocalModels) {
