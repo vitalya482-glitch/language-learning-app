@@ -13,7 +13,7 @@
     <string name="settings_voice_preview_note">Tap a voice to select it and hear a short preview.</string>
     <string name="settings_target_voice_title">Learning language voice</string>
     <string name="settings_explanation_voice_title">Explanation voice</string>
-    <string name="settings_explanation_voice_note">Used for explanations in the learner's native language.</string>
+    <string name="settings_explanation_voice_note">Used for explanations in the learner\'s native language.</string>
     <string name="settings_voice_language">Language: %1$s</string>
     <string name="settings_voice_loading">Loading system voices…</string>
     <string name="settings_voice_none">No system voices are available for this language.</string>
