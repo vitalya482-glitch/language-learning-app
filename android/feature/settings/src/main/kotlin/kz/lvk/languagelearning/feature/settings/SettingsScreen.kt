@@ -46,6 +46,8 @@ import kz.lvk.languagelearning.core.settings.LanguageCatalog
 import kz.lvk.languagelearning.core.settings.LearningLevel
 import kz.lvk.languagelearning.core.speech.AndroidSystemTextToSpeech
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
+import kz.lvk.languagelearning.core.speech.SystemTextToSpeechState
+import kz.lvk.languagelearning.core.speech.SystemTtsVoice
 import kz.lvk.languagelearning.feature.models.LocalModelsScreen
 
 @Composable
@@ -57,6 +59,7 @@ fun SettingsScreen(
     onTargetLanguageChange: (AppLanguage) -> Unit,
     onLearningLevelChange: (LearningLevel) -> Unit,
     onTtsVoiceChange: (AppLanguage, String?) -> Unit,
+    onExplanationTtsVoiceChange: (AppLanguage, String?) -> Unit,
 ) {
     val context = LocalContext.current
     var showLocalModels by rememberSaveable { mutableStateOf(false) }
@@ -72,37 +75,64 @@ fun SettingsScreen(
         return
     }
 
-    val systemTts = remember(context) {
+    val targetTts = remember(context) {
         AndroidSystemTextToSpeech(context.applicationContext)
     }
-    val ttsState by systemTts.state.collectAsStateWithLifecycle()
+    val explanationTts = remember(context) {
+        AndroidSystemTextToSpeech(context.applicationContext)
+    }
+    val targetTtsState by targetTts.state.collectAsStateWithLifecycle()
+    val explanationTtsState by explanationTts.state.collectAsStateWithLifecycle()
+
     val targetLanguage = appSettings.targetLanguage
-    val speechLanguage = remember(targetLanguage.tag) {
+    val nativeLanguage = appSettings.nativeLanguage
+    val targetSpeechLanguage = remember(targetLanguage.tag) {
         SpeechLanguage(targetLanguage.tag)
     }
-    val preferredVoiceId = appSettings.ttsVoiceIdsByLanguage[targetLanguage.tag]
+    val nativeSpeechLanguage = remember(nativeLanguage.tag) {
+        SpeechLanguage(nativeLanguage.tag)
+    }
+    val preferredTargetVoiceId = appSettings.targetVoiceId
+    val preferredExplanationVoiceId = appSettings.explanationVoiceId
     val previewName = remember(context, appSettings.userDisplayName) {
         appSettings.userDisplayName
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?: DeviceDisplayName.resolve(context.applicationContext)
     }
-    val previewText = remember(targetLanguage.tag, previewName) {
+    val targetPreviewText = remember(targetLanguage.tag, previewName) {
         buildVoicePreviewText(targetLanguage, previewName)
     }
-
-    LaunchedEffect(targetLanguage.tag, preferredVoiceId) {
-        systemTts.prepare(speechLanguage, preferredVoiceId)
+    val explanationPreviewText = remember(nativeLanguage.tag, previewName) {
+        buildVoicePreviewText(nativeLanguage, previewName)
     }
 
-    DisposableEffect(systemTts) {
-        onDispose { systemTts.close() }
+    LaunchedEffect(targetLanguage.tag, preferredTargetVoiceId) {
+        targetTts.prepare(targetSpeechLanguage, preferredTargetVoiceId)
+    }
+    LaunchedEffect(nativeLanguage.tag, preferredExplanationVoiceId) {
+        explanationTts.prepare(nativeSpeechLanguage, preferredExplanationVoiceId)
     }
 
-    fun selectAndPreviewVoice(voiceId: String) {
-        systemTts.selectVoice(speechLanguage, voiceId)
+    DisposableEffect(targetTts, explanationTts) {
+        onDispose {
+            targetTts.close()
+            explanationTts.close()
+        }
+    }
+
+    fun selectAndPreviewTargetVoice(voiceId: String) {
+        explanationTts.stop()
+        targetTts.selectVoice(targetSpeechLanguage, voiceId)
         onTtsVoiceChange(targetLanguage, voiceId)
-        systemTts.speak(previewText, speechLanguage)
+        targetTts.speak(targetPreviewText, targetSpeechLanguage)
+    }
+
+    fun selectAndPreviewExplanationVoice(voiceId: String) {
+        targetTts.stop()
+        explanationTts.selectVoice(nativeSpeechLanguage, voiceId)
+        onExplanationTtsVoiceChange(nativeLanguage, voiceId)
+        explanationTts.speak(explanationPreviewText, nativeSpeechLanguage)
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -141,7 +171,7 @@ fun SettingsScreen(
 
                 SettingsChoice(
                     label = stringResource(R.string.settings_native_language),
-                    selectedText = appSettings.nativeLanguage.displayName(),
+                    selectedText = nativeLanguage.displayName(),
                     options = LanguageCatalog.all,
                     optionText = { it.displayName() },
                     onSelected = onNativeLanguageChange,
@@ -210,7 +240,13 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(6.dp))
+
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = stringResource(R.string.settings_target_voice_title),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Spacer(Modifier.height(4.dp))
                 Text(
                     text = stringResource(
                         R.string.settings_voice_language,
@@ -219,71 +255,128 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(12.dp))
             }
 
-            when {
-                !ttsState.isReady && ttsState.errorMessage == null -> {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            CircularProgressIndicator()
-                            Text(stringResource(R.string.settings_voice_loading))
-                        }
-                    }
-                }
+            voicePickerItems(
+                keyPrefix = "target",
+                state = targetTtsState,
+                onSelectVoice = ::selectAndPreviewTargetVoice,
+            )
 
-                ttsState.voices.isEmpty() -> {
-                    item {
-                        Text(
-                            text = ttsState.errorMessage
-                                ?: stringResource(R.string.settings_voice_none),
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
+            item {
+                Spacer(Modifier.height(24.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = stringResource(R.string.settings_explanation_voice_title),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.settings_explanation_voice_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(
+                        R.string.settings_voice_language,
+                        nativeLanguage.displayName(),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+            }
 
-                else -> {
-                    items(
-                        items = ttsState.voices,
-                        key = { it.id },
-                    ) { voice ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectAndPreviewVoice(voice.id) }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(
-                                selected = voice.id == ttsState.selectedVoiceId,
-                                onClick = { selectAndPreviewVoice(voice.id) },
-                            )
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(start = 8.dp),
-                            ) {
-                                Text(
-                                    text = voice.displayName,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                                Text(
-                                    text = if (voice.requiresNetwork) {
-                                        stringResource(R.string.settings_voice_network)
-                                    } else {
-                                        stringResource(R.string.settings_voice_local)
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
+            voicePickerItems(
+                keyPrefix = "explanation",
+                state = explanationTtsState,
+                onSelectVoice = ::selectAndPreviewExplanationVoice,
+            )
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.voicePickerItems(
+    keyPrefix: String,
+    state: SystemTextToSpeechState,
+    onSelectVoice: (String) -> Unit,
+) {
+    when {
+        !state.isReady && state.errorMessage == null -> {
+            item(key = "$keyPrefix-loading") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator()
+                    Text(stringResource(R.string.settings_voice_loading))
                 }
             }
+        }
+
+        state.voices.isEmpty() -> {
+            item(key = "$keyPrefix-empty") {
+                Text(
+                    text = state.errorMessage
+                        ?: stringResource(R.string.settings_voice_none),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+
+        else -> {
+            items(
+                items = state.voices,
+                key = { voice -> "$keyPrefix-${voice.id}" },
+            ) { voice ->
+                VoiceRow(
+                    voice = voice,
+                    selected = voice.id == state.selectedVoiceId,
+                    onSelect = { onSelectVoice(voice.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceRow(
+    voice: SystemTtsVoice,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = onSelect,
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp),
+        ) {
+            Text(
+                text = voice.displayName,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = if (voice.requiresNetwork) {
+                    stringResource(R.string.settings_voice_network)
+                } else {
+                    stringResource(R.string.settings_voice_local)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
