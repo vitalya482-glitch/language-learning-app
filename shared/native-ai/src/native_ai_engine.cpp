@@ -3,6 +3,7 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -15,7 +16,8 @@ namespace lvk::language_learning {
 namespace {
 
 constexpr int32_t kContextTokens = 2048;
-constexpr int32_t kMaxGeneratedTokens = 256;
+constexpr int32_t kMaxGeneratedTokens = 128;
+constexpr auto kMaxGenerationTime = std::chrono::seconds(25);
 
 int32_t inference_threads() {
     const unsigned int available = std::thread::hardware_concurrency();
@@ -258,8 +260,15 @@ std::string NativeAiEngine::generate(
     std::string response;
     response.reserve(1024);
     llama_token generated_token = LLAMA_TOKEN_NULL;
+    const auto started_at = std::chrono::steady_clock::now();
+    bool timed_out = false;
 
     for (int32_t generated = 0; generated < kMaxGeneratedTokens; ++generated) {
+        if (std::chrono::steady_clock::now() - started_at >= kMaxGenerationTime) {
+            timed_out = true;
+            break;
+        }
+
         const int32_t decode_result = llama_decode(context.get(), batch);
         if (decode_result != 0) {
             throw std::runtime_error(
@@ -278,6 +287,9 @@ std::string NativeAiEngine::generate(
 
     response = remove_qwen_thinking(std::move(response));
     if (response.empty()) {
+        if (timed_out) {
+            throw std::runtime_error("Local generation exceeded the 25 second mobile limit");
+        }
         throw std::runtime_error("The local model generated an empty response");
     }
 
