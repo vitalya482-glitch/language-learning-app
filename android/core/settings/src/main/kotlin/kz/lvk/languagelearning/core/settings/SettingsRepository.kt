@@ -1,7 +1,6 @@
 package kz.lvk.languagelearning.core.settings
 
 import android.content.Context
-import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +12,7 @@ interface SettingsRepository {
     fun setNativeLanguage(language: AppLanguage)
     fun setTargetLanguage(language: AppLanguage)
     fun setLearningLevel(level: LearningLevel)
+    fun setUserDisplayName(name: String?)
     fun setTtsVoice(language: AppLanguage, voiceId: String?)
 }
 
@@ -49,6 +49,18 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
             .putString(KEY_LEARNING_LEVEL, level.name)
             .apply()
         _settings.update { it.copy(learningLevel = level) }
+    }
+
+    override fun setUserDisplayName(name: String?) {
+        val normalizedName = name?.trim()?.takeIf { it.isNotEmpty() }
+        preferences.edit().apply {
+            if (normalizedName == null) {
+                remove(KEY_USER_DISPLAY_NAME)
+            } else {
+                putString(KEY_USER_DISPLAY_NAME, normalizedName)
+            }
+        }.apply()
+        _settings.update { it.copy(userDisplayName = normalizedName) }
     }
 
     override fun setTtsVoice(language: AppLanguage, voiceId: String?) {
@@ -90,6 +102,10 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
             ?.let { saved -> runCatching { LearningLevel.valueOf(saved) }.getOrNull() }
             ?: LearningLevel.A1
 
+        val userDisplayName = preferences.getString(KEY_USER_DISPLAY_NAME, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+
         val voices = LanguageCatalog.all.mapNotNull { language ->
             preferences.getString(voicePreferenceKey(language.tag), null)
                 ?.takeIf { it.isNotBlank() }
@@ -100,6 +116,7 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
             nativeLanguageTag = nativeTag,
             targetLanguageTag = targetTag,
             learningLevel = level,
+            userDisplayName = userDisplayName,
             ttsVoiceIdsByLanguage = voices,
         )
     }
@@ -138,6 +155,7 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
         const val KEY_NATIVE_LANGUAGE = "native_language_tag"
         const val KEY_TARGET_LANGUAGE = "target_language_tag"
         const val KEY_LEARNING_LEVEL = "learning_level"
+        const val KEY_USER_DISPLAY_NAME = "user_display_name"
         const val KEY_TTS_VOICE_PREFIX = "tts_voice_"
         const val LEGACY_TTS_PREFERENCES_NAME = "language_learning_system_tts"
     }
