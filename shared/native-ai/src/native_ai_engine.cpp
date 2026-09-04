@@ -257,6 +257,7 @@ std::string NativeAiEngine::generate(
 
     std::string response;
     response.reserve(1024);
+    llama_token generated_token = LLAMA_TOKEN_NULL;
 
     for (int32_t generated = 0; generated < kMaxGeneratedTokens; ++generated) {
         const int32_t decode_result = llama_decode(context.get(), batch);
@@ -266,13 +267,13 @@ std::string NativeAiEngine::generate(
             );
         }
 
-        const llama_token token = llama_sampler_sample(sampler.get(), context.get(), -1);
-        if (llama_vocab_is_eog(vocab, token)) {
+        generated_token = llama_sampler_sample(sampler.get(), context.get(), -1);
+        if (llama_vocab_is_eog(vocab, generated_token)) {
             break;
         }
 
-        response += token_piece(vocab, token);
-        batch = llama_batch_get_one(&token, 1);
+        response += token_piece(vocab, generated_token);
+        batch = llama_batch_get_one(&generated_token, 1);
     }
 
     response = remove_qwen_thinking(std::move(response));
