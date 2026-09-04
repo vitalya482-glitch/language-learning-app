@@ -32,6 +32,11 @@ android {
         targetSdk = 37
         versionCode = androidVersionCode
         versionName = appVersionName
+
+        // The native AI runtime is currently optimized for modern 64-bit Android phones.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -94,6 +99,7 @@ dependencies {
     implementation(project(":android:core:designsystem"))
     implementation(project(":android:core:ai-api"))
     implementation(project(":android:core:ai-native"))
+    implementation(project(":android:core:models"))
     implementation(project(":android:core:speech"))
     implementation(project(":android:core:settings"))
     implementation(project(":android:feature:conversation"))
