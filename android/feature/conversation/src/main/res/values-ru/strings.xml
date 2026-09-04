@@ -14,6 +14,9 @@
     <string name="speech_talk_button">Говорить</string>
     <string name="speech_listening_button">Слушаю…</string>
     <string name="speech_input_language">Микрофон:</string>
+    <string name="speech_feedback_mode">Обратная связь:</string>
+    <string name="speech_feedback_text">Текст</string>
+    <string name="speech_feedback_voice">Голос</string>
     <string name="speech_hold_to_talk">Удерживайте кнопку, пока говорите</string>
     <string name="speech_recognizing">Преобразуем речь в текст…</string>
     <string name="speech_unavailable">Локальное распознавание речи недоступно на этом устройстве или версии Android.</string>
