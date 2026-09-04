@@ -30,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kz.lvk.languagelearning.core.models.LocalModelManager
 import kz.lvk.languagelearning.core.settings.AppLanguage
 import kz.lvk.languagelearning.core.settings.AppSettings
 import kz.lvk.languagelearning.core.settings.DeviceDisplayName
@@ -44,6 +46,7 @@ import kz.lvk.languagelearning.core.settings.LanguageCatalog
 import kz.lvk.languagelearning.core.settings.LearningLevel
 import kz.lvk.languagelearning.core.speech.AndroidSystemTextToSpeech
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
+import kz.lvk.languagelearning.feature.models.LocalModelsScreen
 
 @Composable
 fun SettingsScreen(
@@ -55,6 +58,22 @@ fun SettingsScreen(
     onTtsVoiceChange: (AppLanguage, String?) -> Unit,
 ) {
     val context = LocalContext.current
+    var showLocalModels by rememberSaveable { mutableStateOf(false) }
+    val localModelManager = remember(context) {
+        LocalModelManager(context.applicationContext)
+    }
+    val localModelsState by localModelManager.state.collectAsStateWithLifecycle()
+
+    if (showLocalModels) {
+        LocalModelsScreen(
+            state = localModelsState,
+            onBack = { showLocalModels = false },
+            onDownload = localModelManager::download,
+            onDelete = localModelManager::delete,
+        )
+        return
+    }
+
     val systemTts = remember(context) {
         AndroidSystemTextToSpeech(context.applicationContext)
     }
@@ -147,6 +166,31 @@ fun SettingsScreen(
                     optionText = { it.name },
                     onSelected = onLearningLevelChange,
                 )
+
+                Spacer(Modifier.height(28.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(28.dp))
+
+                Text(
+                    text = stringResource(R.string.settings_models_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.settings_models_note),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = {
+                        localModelManager.refresh()
+                        showLocalModels = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.settings_models_open))
+                }
 
                 Spacer(Modifier.height(28.dp))
                 HorizontalDivider()
