@@ -22,6 +22,7 @@ data class SpeechRecognitionState(
     val recordingStartedAtMs: Long? = null,
     val partialText: String = "",
     val finalText: String = "",
+    val errorCode: Int? = null,
     val errorMessage: String? = null,
     val languageModelDownloadRequired: Boolean = false,
     val languageModelDownloadRequested: Boolean = false,
@@ -80,6 +81,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                         isFinalizing = false,
                         rmsDb = 0f,
                         recordingStartedAtMs = null,
+                        errorCode = error,
                         errorMessage = errorMessage(error),
                         languageModelDownloadRequired = languageDownloadRequired,
                         languageModelDownloadRequested = false,
@@ -97,6 +99,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                         recordingStartedAtMs = null,
                         partialText = "",
                         finalText = text,
+                        errorCode = null,
                         errorMessage = null,
                         languageModelDownloadRequired = false,
                         languageModelDownloadRequested = false,
@@ -116,7 +119,10 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         val activeRecognizer = recognizer
         if (activeRecognizer == null) {
             _state.update {
-                it.copy(errorMessage = "On-device speech recognition is not available on this device")
+                it.copy(
+                    errorCode = null,
+                    errorMessage = "On-device speech recognition is not available on this device",
+                )
             }
             return
         }
@@ -131,6 +137,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                 recordingStartedAtMs = SystemClock.elapsedRealtime(),
                 partialText = "",
                 finalText = "",
+                errorCode = null,
                 errorMessage = null,
                 languageModelDownloadRequired = false,
                 languageModelDownloadRequested = false,
@@ -157,7 +164,10 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         val activeRecognizer = recognizer
         if (activeRecognizer == null) {
             _state.update {
-                it.copy(errorMessage = "On-device speech recognition is not available on this device")
+                it.copy(
+                    errorCode = null,
+                    errorMessage = "On-device speech recognition is not available on this device",
+                )
             }
             return
         }
@@ -167,6 +177,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                 it.copy(
                     languageModelDownloadRequired = false,
                     languageModelDownloadRequested = false,
+                    errorCode = null,
                     errorMessage = "Android 13 or newer is required to request an offline speech language model",
                 )
             }
@@ -180,6 +191,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                 isFinalizing = false,
                 languageModelDownloadRequired = false,
                 languageModelDownloadRequested = true,
+                errorCode = null,
                 errorMessage = null,
             )
         }
@@ -191,6 +203,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
                 it.copy(
                     languageModelDownloadRequested = false,
                     languageModelDownloadRequired = true,
+                    errorCode = null,
                     errorMessage = error.message ?: "Unable to request speech language model download",
                 )
             }
