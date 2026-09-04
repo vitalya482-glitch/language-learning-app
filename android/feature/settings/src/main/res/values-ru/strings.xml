@@ -5,6 +5,9 @@
     <string name="settings_native_language">Родной язык</string>
     <string name="settings_target_language">Изучаемый язык</string>
     <string name="settings_learning_level">Уровень</string>
+    <string name="settings_models_title">Локальные AI-модели</string>
+    <string name="settings_models_note">Скачивание и управление локальными моделями отдельно от приложения.</string>
+    <string name="settings_models_open">Открыть менеджер моделей</string>
     <string name="settings_voice_title">Голос озвучивания</string>
     <string name="settings_voice_system_note">Голоса предоставляет системный Android Text-to-Speech. Они устанавливаются и хранятся в системе телефона и не являются частью Language Learning.</string>
     <string name="settings_voice_preview_note">Нажмите на голос, чтобы выбрать его и сразу услышать короткий пример.</string>
