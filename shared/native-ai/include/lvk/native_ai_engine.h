@@ -2,6 +2,8 @@
 
 #include <string>
 
+struct llama_model;
+
 namespace lvk::language_learning {
 
 struct ModelDescriptor {
@@ -12,6 +14,12 @@ struct ModelDescriptor {
 
 class NativeAiEngine {
 public:
+    NativeAiEngine() = default;
+    ~NativeAiEngine();
+
+    NativeAiEngine(const NativeAiEngine&) = delete;
+    NativeAiEngine& operator=(const NativeAiEngine&) = delete;
+
     void load(ModelDescriptor model);
     [[nodiscard]] std::string generate(
         const std::string& system_prompt,
@@ -22,8 +30,8 @@ public:
     [[nodiscard]] bool is_loaded() const noexcept;
 
 private:
-    bool loaded_ = false;
     ModelDescriptor model_;
+    llama_model* model_handle_ = nullptr;
 };
 
 }  // namespace lvk::language_learning
