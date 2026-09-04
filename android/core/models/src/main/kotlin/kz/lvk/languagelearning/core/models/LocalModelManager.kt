@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.StatFs
 import java.io.File
 import java.security.MessageDigest
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,7 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -53,7 +53,7 @@ class LocalModelManager(context: Context) {
 
         val available = availableBytes()
         val required = spec.estimatedSizeBytes + DOWNLOAD_HEADROOM_BYTES
-        if (available in 1 until required) {
+        if (available > 0L && available < required) {
             statuses[modelId] = LocalModelStatus.Error(
                 "Недостаточно свободного места. Нужно примерно ${humanBytes(required)}.",
             )
@@ -181,8 +181,8 @@ class LocalModelManager(context: Context) {
                     }
 
                     else -> {
-                        val total = result.total.takeIf { it > 0 } ?: spec.estimatedSizeBytes
-                        val progress = total.takeIf { it > 0 }?.let {
+                        val total = result.total.takeIf { it > 0L } ?: spec.estimatedSizeBytes
+                        val progress = total.takeIf { it > 0L }?.let {
                             ((result.downloaded * 100L) / it).toInt().coerceIn(0, 100)
                         }
                         statuses[spec.id] = LocalModelStatus.Downloading(
@@ -200,23 +200,23 @@ class LocalModelManager(context: Context) {
     }
 
     private suspend fun verifyAndFinalize(spec: LocalModelSpec) {
+        val partial = partialFile(spec)
         statuses[spec.id] = LocalModelStatus.Downloading(
             progressPercent = 100,
-            downloadedBytes = partialFile(spec).length(),
-            totalBytes = partialFile(spec).length(),
+            downloadedBytes = partial.length(),
+            totalBytes = partial.length(),
         )
         publishState()
 
-        val result = withContext(Dispatchers.IO) {
-            val partial = partialFile(spec)
+        val result: Result<File> = withContext(Dispatchers.IO) {
             if (!partial.isFile) {
-                return@withContext Result.failure<File>(IllegalStateException("Скачанный файл модели не найден."))
+                return@withContext Result.failure(IllegalStateException("Скачанный файл модели не найден."))
             }
 
             val actualHash = partial.sha256()
             if (!actualHash.equals(spec.sha256, ignoreCase = true)) {
                 partial.delete()
-                return@withContext Result.failure<File>(IllegalStateException("SHA-256 модели не совпадает."))
+                return@withContext Result.failure(IllegalStateException("SHA-256 модели не совпадает."))
             }
 
             val final = finalFile(spec)
@@ -307,9 +307,9 @@ class LocalModelManager(context: Context) {
         fun humanBytes(bytes: Long): String {
             val mb = bytes / 1_000_000.0
             return if (mb >= 1000.0) {
-                String.format("%.1f ГБ", mb / 1000.0)
+                String.format(Locale.US, "%.1f ГБ", mb / 1000.0)
             } else {
-                String.format("%.0f МБ", mb)
+                String.format(Locale.US, "%.0f МБ", mb)
             }
         }
     }
