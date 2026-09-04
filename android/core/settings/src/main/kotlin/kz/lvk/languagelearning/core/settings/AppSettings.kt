@@ -55,6 +55,7 @@ data class AppSettings(
     val nativeLanguageTag: String = LanguageCatalog.Russian.tag,
     val targetLanguageTag: String = LanguageCatalog.English.tag,
     val learningLevel: LearningLevel = LearningLevel.A1,
+    val userDisplayName: String? = null,
     val ttsVoiceIdsByLanguage: Map<String, String> = emptyMap(),
 ) {
     val nativeLanguage: AppLanguage
