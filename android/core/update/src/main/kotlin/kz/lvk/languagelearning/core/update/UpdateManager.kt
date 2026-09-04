@@ -28,6 +28,10 @@ class UpdateManager(
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
+    init {
+        cleanupDownloadedUpdatePackages()
+    }
+
     suspend fun checkForUpdates() {
         _state.value = UpdateState.Checking
         runCatching { repository.getManifest(manifestUrl) }
@@ -63,12 +67,11 @@ class UpdateManager(
             return
         }
 
-        val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        val updatesDir = updatesDirectory()
             ?: run {
                 _state.value = UpdateState.Error("Downloads directory is unavailable")
                 return
             }
-        val updatesDir = File(downloadsDir, "updates").apply { mkdirs() }
         val apkFile = File(updatesDir, "language-learning-${manifest.latestVersion}.apk")
         if (apkFile.exists()) apkFile.delete()
 
@@ -141,6 +144,17 @@ class UpdateManager(
         }
         _state.value = UpdateState.LaunchingInstaller
         context.startActivity(intent)
+    }
+
+    private fun cleanupDownloadedUpdatePackages() {
+        updatesDirectory()?.listFiles()?.forEach { file ->
+            if (file.isFile) file.delete()
+        }
+    }
+
+    private fun updatesDirectory(): File? {
+        val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return null
+        return File(downloadsDir, "updates").apply { mkdirs() }
     }
 
     private fun File.sha256(): String {
