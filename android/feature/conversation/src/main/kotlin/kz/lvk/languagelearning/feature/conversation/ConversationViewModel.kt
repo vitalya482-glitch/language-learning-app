@@ -37,8 +37,12 @@ class ConversationViewModel(
         - Continue with one short natural reply or question in the target language.
         - If the learner writes in the native language, translate the intended phrase into the target language and continue.
         - If the learner's phrase is already correct, say so briefly and continue.
-        - Keep the complete answer under about 80 words.
+        - Keep the complete visible answer under about 80 words.
         - Do not output hidden reasoning or a thinking section.
+        - Always finish with exactly one machine-readable TTS block in this format:
+          [[SPEAK]]one short natural reply or question in the target language[[/SPEAK]]
+        - The text inside [[SPEAK]] must contain only the phrase that should be spoken aloud in the target language.
+          Do not put explanations, translations, labels or quotation marks inside the TTS block.
     """.trimIndent()
 
     init {
@@ -98,10 +102,12 @@ class ConversationViewModel(
                     ),
                 )
             }.onSuccess { response ->
+                val parsedResponse = parseTutorResponse(response.text)
                 val assistantMessage = ConversationMessage(
                     id = nextMessageId++,
-                    text = response.text,
+                    text = parsedResponse.visibleText,
                     role = ConversationRole.Assistant,
+                    spokenText = parsedResponse.spokenText,
                 )
                 _state.update {
                     it.copy(
@@ -141,4 +147,44 @@ class ConversationViewModel(
             ) as T
         }
     }
+}
+
+private data class ParsedTutorResponse(
+    val visibleText: String,
+    val spokenText: String?,
+)
+
+private val ttsBlockRegex = Regex(
+    pattern = """(?s)\[\[SPEAK\]\](.*?)\[\[/SPEAK\]\]""",
+)
+
+private val legacySpokenReplyRegex = Regex(
+    pattern = """(?im)^\s*(?:short\s+reply|spoken\s+reply|reply)\s*:\s*[\"“]?(.+?)[\"”]?\s*$""",
+)
+
+private fun parseTutorResponse(rawText: String): ParsedTutorResponse {
+    val blockMatch = ttsBlockRegex.find(rawText)
+    val markerSpokenText = blockMatch
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+
+    val legacySpokenText = legacySpokenReplyRegex
+        .find(rawText)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.trim()
+        ?.trim('"', '“', '”')
+        ?.takeIf { it.isNotBlank() }
+
+    val visibleText = rawText
+        .replace(ttsBlockRegex, "")
+        .trim()
+        .ifBlank { rawText.trim() }
+
+    return ParsedTutorResponse(
+        visibleText = visibleText,
+        spokenText = markerSpokenText ?: legacySpokenText,
+    )
 }
