@@ -3,6 +3,7 @@ package kz.lvk.languagelearning.feature.conversation
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.SystemClock
+import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -64,10 +65,15 @@ fun ConversationScreen(
     onSendMessage: (String) -> Unit,
     onRetryEngine: () -> Unit,
     speechLanguage: SpeechLanguage = SpeechLanguages.English,
+    nativeSpeechLanguage: SpeechLanguage = speechLanguage,
     ttsVoiceId: String? = null,
 ) {
     var input by remember { mutableStateOf("") }
     var microphonePermissionDenied by remember { mutableStateOf(false) }
+    var useNativeSpeechLanguage by remember(nativeSpeechLanguage.tag, speechLanguage.tag) {
+        mutableStateOf(false)
+    }
+    var generationElapsedMs by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
     val speechRecognizer = remember(context) {
         AndroidOnDeviceSpeechRecognizer(context.applicationContext)
@@ -77,7 +83,12 @@ fun ConversationScreen(
     }
     val speechState by speechRecognizer.state.collectAsStateWithLifecycle()
     val ttsState by systemTts.state.collectAsStateWithLifecycle()
-    val speechLanguageDisplayName = speechLanguage.displayName()
+    val activeSpeechLanguage = if (useNativeSpeechLanguage) {
+        nativeSpeechLanguage
+    } else {
+        speechLanguage
+    }
+    val activeSpeechLanguageDisplayName = activeSpeechLanguage.displayName()
 
     DisposableEffect(speechRecognizer, systemTts) {
         onDispose {
@@ -93,6 +104,18 @@ fun ConversationScreen(
     LaunchedEffect(speechState.finalText) {
         if (speechState.finalText.isNotBlank()) {
             input = speechState.finalText
+        }
+    }
+
+    LaunchedEffect(state.isGenerating) {
+        if (state.isGenerating) {
+            val startedAt = SystemClock.elapsedRealtime()
+            while (true) {
+                generationElapsedMs = SystemClock.elapsedRealtime() - startedAt
+                delay(250)
+            }
+        } else {
+            generationElapsedMs = 0L
         }
     }
 
@@ -147,7 +170,20 @@ fun ConversationScreen(
                 }
                 if (state.isGenerating) {
                     item {
-                        CircularProgressIndicator()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                            Text(
+                                text = stringResource(
+                                    R.string.conversation_generating,
+                                    formatRecordingDuration(generationElapsedMs),
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -164,7 +200,13 @@ fun ConversationScreen(
 
             SpeechInputControl(
                 speechState = speechState,
-                languageDisplayName = speechLanguageDisplayName,
+                languageDisplayName = activeSpeechLanguageDisplayName,
+                nativeLanguageDisplayName = nativeSpeechLanguage.displayName(),
+                targetLanguageDisplayName = speechLanguage.displayName(),
+                useNativeLanguage = useNativeSpeechLanguage,
+                showLanguageSelector = nativeSpeechLanguage.tag != speechLanguage.tag,
+                onUseNativeLanguage = { useNativeSpeechLanguage = true },
+                onUseTargetLanguage = { useNativeSpeechLanguage = false },
                 microphonePermissionDenied = microphonePermissionDenied,
                 onRequestPermission = {
                     microphonePermissionDenied = false
@@ -177,11 +219,11 @@ fun ConversationScreen(
                 onStartListening = {
                     microphonePermissionDenied = false
                     systemTts.stop()
-                    speechRecognizer.startListening(speechLanguage)
+                    speechRecognizer.startListening(activeSpeechLanguage)
                 },
                 onStopListening = speechRecognizer::stopListening,
                 onDownloadLanguageModel = {
-                    speechRecognizer.requestLanguageModelDownload(speechLanguage)
+                    speechRecognizer.requestLanguageModelDownload(activeSpeechLanguage)
                 },
             )
 
@@ -242,6 +284,12 @@ fun ConversationScreen(
 private fun SpeechInputControl(
     speechState: SpeechRecognitionState,
     languageDisplayName: String,
+    nativeLanguageDisplayName: String,
+    targetLanguageDisplayName: String,
+    useNativeLanguage: Boolean,
+    showLanguageSelector: Boolean,
+    onUseNativeLanguage: () -> Unit,
+    onUseTargetLanguage: () -> Unit,
     microphonePermissionDenied: Boolean,
     onRequestPermission: () -> Unit,
     hasMicrophonePermission: () -> Boolean,
@@ -267,6 +315,45 @@ private fun SpeechInputControl(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (showLanguageSelector) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.speech_input_language),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    onClick = onUseNativeLanguage,
+                    enabled = !speechState.isListening && !speechState.isFinalizing,
+                ) {
+                    Text(
+                        if (useNativeLanguage) {
+                            "✓ $nativeLanguageDisplayName"
+                        } else {
+                            nativeLanguageDisplayName
+                        },
+                    )
+                }
+                TextButton(
+                    onClick = onUseTargetLanguage,
+                    enabled = !speechState.isListening && !speechState.isFinalizing,
+                ) {
+                    Text(
+                        if (!useNativeLanguage) {
+                            "✓ $targetLanguageDisplayName"
+                        } else {
+                            targetLanguageDisplayName
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
         Surface(
             shape = CircleShape,
             color = if (speechState.isListening) {
@@ -404,6 +491,13 @@ private fun SpeechInputControl(
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+
+                speechState.errorCode == SpeechRecognizer.ERROR_NO_MATCH -> Text(
+                    text = stringResource(R.string.speech_no_match, languageDisplayName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                     textAlign = TextAlign.Center,
                 )
 
