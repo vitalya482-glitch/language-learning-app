@@ -27,6 +27,16 @@ int32_t inference_threads() {
     return static_cast<int32_t>(std::max(1u, std::min(4u, available)));
 }
 
+llama_context_params mobile_context_params() {
+    llama_context_params params = llama_context_default_params();
+    params.n_ctx = kContextTokens;
+    params.n_batch = kContextTokens;
+    params.n_threads = inference_threads();
+    params.n_threads_batch = inference_threads();
+    params.no_perf = false;
+    return params;
+}
+
 std::string trim_copy(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -60,8 +70,6 @@ std::string format_chat_prompt(
         ? "You are a concise language tutor."
         : system_prompt;
 
-    // Qwen3 supports /no_think in the user message. For a phone tutor we want the
-    // final answer, not a long hidden-reasoning style preamble that wastes tokens.
     const std::string effective_user = user_text + "\n/no_think";
 
     const llama_chat_message messages[] = {
@@ -189,23 +197,30 @@ void NativeAiEngine::load(ModelDescriptor model) {
 
     unload();
 
-    llama_model_params params = llama_model_default_params();
-    params.n_gpu_layers = 0; // CPU-first baseline; GPU acceleration comes later.
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = 0;
 
-    llama_model* loaded = llama_model_load_from_file(model.local_path.c_str(), params);
-    if (loaded == nullptr) {
+    llama_model* loaded_model = llama_model_load_from_file(model.local_path.c_str(), model_params);
+    if (loaded_model == nullptr) {
         throw std::runtime_error("llama.cpp could not load the GGUF model");
     }
 
+    llama_context* loaded_context = llama_init_from_model(loaded_model, mobile_context_params());
+    if (loaded_context == nullptr) {
+        llama_model_free(loaded_model);
+        throw std::runtime_error("llama.cpp could not create the mobile inference context");
+    }
+
     model_ = std::move(model);
-    model_handle_ = loaded;
+    model_handle_ = loaded_model;
+    context_handle_ = loaded_context;
 }
 
 std::string NativeAiEngine::generate(
     const std::string& system_prompt,
     const std::string& user_text
 ) const {
-    if (model_handle_ == nullptr) {
+    if (model_handle_ == nullptr || context_handle_ == nullptr) {
         throw std::logic_error("A model must be loaded before generation");
     }
     if (trim_copy(user_text).empty()) {
@@ -226,20 +241,8 @@ std::string NativeAiEngine::generate(
         throw std::invalid_argument("The prompt is too long for the mobile inference context");
     }
 
-    llama_context_params context_params = llama_context_default_params();
-    context_params.n_ctx = kContextTokens;
-    context_params.n_batch = kContextTokens;
-    context_params.n_threads = inference_threads();
-    context_params.n_threads_batch = inference_threads();
-    context_params.no_perf = false;
-
-    std::unique_ptr<llama_context, decltype(&llama_free)> context(
-        llama_init_from_model(model_handle_, context_params),
-        &llama_free
-    );
-    if (!context) {
-        throw std::runtime_error("llama.cpp could not create an inference context");
-    }
+    llama_memory_clear(llama_get_memory(context_handle_), true);
+    llama_synchronize(context_handle_);
 
     std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
         llama_sampler_chain_init(llama_sampler_chain_default_params()),
@@ -269,14 +272,14 @@ std::string NativeAiEngine::generate(
             break;
         }
 
-        const int32_t decode_result = llama_decode(context.get(), batch);
+        const int32_t decode_result = llama_decode(context_handle_, batch);
         if (decode_result != 0) {
             throw std::runtime_error(
                 "llama.cpp decode failed with code " + std::to_string(decode_result)
             );
         }
 
-        generated_token = llama_sampler_sample(sampler.get(), context.get(), -1);
+        generated_token = llama_sampler_sample(sampler.get(), context_handle_, -1);
         if (llama_vocab_is_eog(vocab, generated_token)) {
             break;
         }
@@ -297,6 +300,10 @@ std::string NativeAiEngine::generate(
 }
 
 void NativeAiEngine::unload() noexcept {
+    if (context_handle_ != nullptr) {
+        llama_free(context_handle_);
+        context_handle_ = nullptr;
+    }
     if (model_handle_ != nullptr) {
         llama_model_free(model_handle_);
         model_handle_ = nullptr;
@@ -305,7 +312,7 @@ void NativeAiEngine::unload() noexcept {
 }
 
 bool NativeAiEngine::is_loaded() const noexcept {
-    return model_handle_ != nullptr;
+    return model_handle_ != nullptr && context_handle_ != nullptr;
 }
 
 }  // namespace lvk::language_learning
