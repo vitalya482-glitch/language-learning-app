@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
                             onTargetLanguageChange = app.container.settingsRepository::setTargetLanguage,
                             onLearningLevelChange = app.container.settingsRepository::setLearningLevel,
                             onTtsVoiceChange = app.container.settingsRepository::setTtsVoice,
+                            onExplanationTtsVoiceChange = app.container.settingsRepository::setExplanationTtsVoice,
                         )
                     }
 
