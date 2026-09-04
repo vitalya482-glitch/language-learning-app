@@ -1,15 +1,15 @@
 <resources>
-    <string name="conversation_title">Проверка Native AI</string>
+    <string name="conversation_title">Локальный AI-преподаватель</string>
     <string name="conversation_back">Назад</string>
-    <string name="conversation_loading">Загружаем нативный C++-движок…</string>
-    <string name="conversation_ready">Нативный движок готов. Отправьте сообщение, чтобы проверить JNI-мост.</string>
+    <string name="conversation_loading">Загружаем локальную AI-модель…</string>
+    <string name="conversation_ready">Локальный AI готов. Скажите или напишите фразу, чтобы начать.</string>
     <string name="conversation_input_label">Сообщение</string>
     <string name="conversation_speak_text">Озвучить текст</string>
     <string name="conversation_stop_speaking">Остановить озвучивание</string>
     <string name="conversation_tts_error">Системный голос: %1$s</string>
-    <string name="conversation_send">Отправить в C++</string>
+    <string name="conversation_send">Отправить</string>
     <string name="conversation_retry">Повторить</string>
-    <string name="conversation_error">Ошибка нативного движка: %1$s</string>
+    <string name="conversation_error">Ошибка локального AI: %1$s</string>
     <string name="speech_talk_button">Говорить</string>
     <string name="speech_listening_button">Слушаю…</string>
     <string name="speech_hold_to_talk">Удерживайте кнопку, пока говорите</string>
