@@ -94,6 +94,12 @@ class MainActivity : ComponentActivity() {
                             ),
                             ttsVoiceId = appSettings.targetVoiceId,
                             explanationTtsVoiceId = appSettings.explanationVoiceId,
+                            nativeTtsVoiceId =
+                                appSettings.explanationTtsVoiceIdsByLanguage[
+                                    appSettings.nativeLanguageTag
+                                ] ?: appSettings.ttsVoiceIdsByLanguage[
+                                    appSettings.nativeLanguageTag
+                                ],
                         )
                     }
 

@@ -14,6 +14,7 @@ data class ConversationMessage(
     val role: ConversationRole,
     val spokenText: String? = null,
     val speechSegments: List<ConversationSpeechSegment> = emptyList(),
+    val conversationText: String? = null,
 )
 
 data class ConversationSpeechSegment(

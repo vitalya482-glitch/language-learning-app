@@ -76,6 +76,7 @@ fun ConversationScreen(
     explanationSpeechLanguage: SpeechLanguage = nativeSpeechLanguage,
     ttsVoiceId: String? = null,
     explanationTtsVoiceId: String? = null,
+    nativeTtsVoiceId: String? = null,
 ) {
     var input by remember { mutableStateOf("") }
     var microphonePermissionDenied by remember { mutableStateOf(false) }
@@ -127,8 +128,10 @@ fun ConversationScreen(
         flowModeEnabled,
         speechLanguage.tag,
         explanationSpeechLanguage.tag,
+        nativeSpeechLanguage.tag,
         ttsVoiceId,
         explanationTtsVoiceId,
+        nativeTtsVoiceId,
     ) {
         val message = lastAssistantMessage
         if (
@@ -151,24 +154,45 @@ fun ConversationScreen(
                     .orEmpty()
             }
 
-            speechSegments.forEach { segment ->
-                val isExplanation =
-                    segment.language == ConversationSpeechLanguage.Explanation
-                val segmentLanguage = if (isExplanation) {
-                    explanationSpeechLanguage
-                } else {
-                    speechLanguage
+            val playbackSegments = speechSegments
+                .map { segment ->
+                    val declaredLanguage = when (segment.language) {
+                        ConversationSpeechLanguage.Explanation -> explanationSpeechLanguage
+                        ConversationSpeechLanguage.Target -> speechLanguage
+                    }
+                    val resolvedLanguage = resolveSpeechLanguage(
+                        text = segment.text,
+                        declaredLanguage = declaredLanguage,
+                        nativeLanguage = nativeSpeechLanguage,
+                        targetLanguage = speechLanguage,
+                        explanationLanguage = explanationSpeechLanguage,
+                    )
+                    TtsPlaybackSegment(
+                        text = segment.text,
+                        language = resolvedLanguage,
+                        voiceId = when (resolvedLanguage.tag) {
+                            speechLanguage.tag -> ttsVoiceId
+                            nativeSpeechLanguage.tag -> nativeTtsVoiceId
+                            else -> explanationTtsVoiceId
+                        },
+                    )
                 }
-                val segmentVoiceId = if (isExplanation) {
-                    explanationTtsVoiceId
-                } else {
-                    ttsVoiceId
-                }
-                val utteranceId = systemTts.speak(
+                .mergeAdjacentPlaybackSegments()
+
+            playbackSegments.forEach { segment ->
+                var utteranceId = systemTts.speak(
                     text = segment.text,
-                    language = segmentLanguage,
-                    voiceId = segmentVoiceId,
+                    language = segment.language,
+                    voiceId = segment.voiceId,
                 )
+                if (utteranceId == null) {
+                    delay(TTS_START_RETRY_DELAY_MS)
+                    utteranceId = systemTts.speak(
+                        text = segment.text,
+                        language = segment.language,
+                        voiceId = segment.voiceId,
+                    )
+                }
                 if (utteranceId != null) {
                     waitForUtteranceOrTimeout(systemTts, utteranceId, segment.text.length)
                     delay(TTS_SEGMENT_PAUSE_MS)
@@ -874,17 +898,89 @@ private fun generationStatusText(
 private const val FLOW_RESTART_DELAY_MS = 700L
 private const val FLOW_RETRY_DELAY_MS = 700L
 private const val TTS_SEGMENT_PAUSE_MS = 160L
+private const val TTS_START_RETRY_DELAY_MS = 300L
+
+private data class TtsPlaybackSegment(
+    val text: String,
+    val language: SpeechLanguage,
+    val voiceId: String?,
+)
+
+private enum class TextScript {
+    Cyrillic,
+    Latin,
+    Han,
+}
+
+private fun resolveSpeechLanguage(
+    text: String,
+    declaredLanguage: SpeechLanguage,
+    nativeLanguage: SpeechLanguage,
+    targetLanguage: SpeechLanguage,
+    explanationLanguage: SpeechLanguage,
+): SpeechLanguage {
+    val detectedScript = dominantTextScript(text) ?: return declaredLanguage
+    if (languageScript(declaredLanguage) == detectedScript) return declaredLanguage
+
+    return listOf(targetLanguage, nativeLanguage, explanationLanguage)
+        .distinctBy { it.tag }
+        .firstOrNull { languageScript(it) == detectedScript }
+        ?: declaredLanguage
+}
+
+private fun dominantTextScript(text: String): TextScript? {
+    val counts = mapOf(
+        TextScript.Cyrillic to text.count { it in '\u0400'..'\u052f' },
+        TextScript.Latin to text.count {
+            it in 'A'..'Z' || it in 'a'..'z' || it in '\u00c0'..'\u024f'
+        },
+        TextScript.Han to text.count { it in '\u3400'..'\u9fff' },
+    )
+    return counts.maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key
+}
+
+private fun languageScript(language: SpeechLanguage): TextScript =
+    when (language.tag.substringBefore('-').lowercase()) {
+        "ru", "kk" -> TextScript.Cyrillic
+        "zh" -> TextScript.Han
+        else -> TextScript.Latin
+    }
+
+private fun List<TtsPlaybackSegment>.mergeAdjacentPlaybackSegments(): List<TtsPlaybackSegment> =
+    fold(mutableListOf<TtsPlaybackSegment>()) { merged, segment ->
+        val previous = merged.lastOrNull()
+        if (
+            previous != null &&
+            previous.language.tag == segment.language.tag &&
+            previous.voiceId == segment.voiceId
+        ) {
+            merged[merged.lastIndex] = previous.copy(
+                text = "${previous.text.trim()}\n\n${segment.text.trim()}",
+            )
+        } else {
+            merged += segment
+        }
+        merged
+    }
 
 private suspend fun waitForUtteranceOrTimeout(
     systemTts: AndroidSystemTextToSpeech,
     utteranceId: String,
     characterCount: Int,
 ) {
-    val timeoutMs = (4_000L + characterCount * 90L).coerceIn(8_000L, 120_000L)
+    val timeoutMs = (4_000L + characterCount * 90L).coerceIn(8_000L, 60_000L)
     val startedAt = SystemClock.elapsedRealtime()
+    var observedEngineSpeaking = false
     while (SystemClock.elapsedRealtime() - startedAt < timeoutMs) {
         val current = systemTts.state.value
         if (!current.isSpeaking || current.activeUtteranceId != utteranceId) return
+        val engineSpeaking = systemTts.isSpeakingNow()
+        observedEngineSpeaking = observedEngineSpeaking || engineSpeaking
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+        if ((observedEngineSpeaking && !engineSpeaking) || (elapsedMs >= 1_500L && !engineSpeaking)) {
+            systemTts.stop()
+            return
+        }
         delay(100L)
     }
 

@@ -3,6 +3,7 @@ package kz.lvk.languagelearning.feature.conversation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +18,7 @@ class ConversationViewModel(
     private val engine: LanguageModelEngine,
     private val model: LocalModelDescriptor?,
     nativeLanguageTag: String,
-    targetLanguageTag: String,
+    private val targetLanguageTag: String,
     learningLevel: String,
     includePhraseAnalysis: Boolean,
     private val includeNaturalPhrase: Boolean,
@@ -31,32 +32,37 @@ class ConversationViewModel(
     private val includePhraseAnalysis = includePhraseAnalysis
     private val includeConversationReply = includeConversationReply ||
         (!includePhraseAnalysis && !includeNaturalPhrase)
+    private val nativeLanguageName = languageName(nativeLanguageTag)
+    private val targetLanguageName = languageName(targetLanguageTag)
+    private val explanationLanguageName = languageName(explanationLanguageTag)
 
     private val analysisSystemPrompt = """
-        You are the analysis stage of a language tutor. The learner speaks $nativeLanguageTag and
-        studies $targetLanguageTag at CEFR level $learningLevel. Carefully understand the CURRENT
-        learner message and use recent conversation only as context. Explain its meaning and any
-        important grammar or word-choice issue. If it is already natural, say that briefly. Write
-        1-3 concise learner-facing sentences in $explanationLanguageTag. Do not answer the learner,
-        suggest several alternatives, use numbered lists, Markdown, headings, generic praise, or
-        an earlier topic. Return only the useful language analysis.
+        You are a $targetLanguageName teacher. The learner's native language is
+        $nativeLanguageName and their level is $learningLevel. Analyze only the text marked
+        CURRENT LEARNER PHRASE. Explain its meaning and the most important grammar or word-choice
+        issue. If it is correct, say so briefly. Your entire final answer must be 1-2 short
+        sentences in $explanationLanguageName ($explanationLanguageTag). Do not continue the
+        conversation, invent an intention, add a corrected example, use a list, Markdown, a
+        heading, generic praise, or text from an earlier turn.
     """.trimIndent()
 
     private val naturalPhraseSystemPrompt = """
-        You are the natural-phrase stage of a language tutor. The learner studies
-        $targetLanguageTag at CEFR level $learningLevel. Based on the completed analysis, rewrite
-        the CURRENT learner message as one natural phrase in $targetLanguageTag while preserving
-        its intended meaning. Return only that phrase: no label, translation, quote marks,
-        explanation, list, Markdown, or reply.
+        Rewrite only the text marked CURRENT LEARNER PHRASE as one natural sentence in
+        $targetLanguageName ($targetLanguageTag). Preserve the learner's exact meaning, point of
+        view, names, job, place, and question. Do not add new facts or turn the learner's sentence
+        into a tutor's reply. Keep a short greeting short. Return only the rewritten learner
+        phrase, with no label, translation, quote marks, explanation, list, or Markdown.
     """.trimIndent()
 
     private val replySystemPrompt = """
-        You are the response stage of a friendly language tutor. The learner speaks
-        $nativeLanguageTag and studies $targetLanguageTag at CEFR level $learningLevel. Use the
-        supplied analysis to answer the CURRENT learner message directly. Write 1-3 natural,
-        specific sentences in $targetLanguageTag and finish with one relevant question that keeps
-        the same topic moving. Never fall back to generic praise, offers to start, or a topic from
-        an earlier turn. Do not repeat the analysis, use headings, tags, or hidden reasoning.
+        You are a friendly $targetLanguageName conversation partner. Respond directly to the text
+        marked CURRENT LEARNER PHRASE in 1-3 concise sentences in $targetLanguageName
+        ($targetLanguageTag), then ask one specific question that naturally continues its topic.
+        The recent dialogue is context only. Never repeat an earlier answer, ask how you can help,
+        ask the learner to provide context, give generic praise, or discuss an older topic. If the
+        learner asks you to assess their language level, start the assessment with a concrete
+        open-ended question instead of asking what they want to assess. Do not repeat the language
+        analysis or use headings, tags, lists, or Markdown.
     """.trimIndent()
 
     init {
@@ -110,36 +116,39 @@ class ConversationViewModel(
 
         viewModelScope.launch {
             runCatching {
-                val conversationInput = buildModelInput(currentState.messages, userText)
+                val conversationHistory = buildConversationHistory(currentState.messages)
+                val analysisInput = buildAnalysisInput(conversationHistory, userText)
                 val analysis = generateStageWithRetry(
                     LanguageModelRequest(
                         systemPrompt = analysisSystemPrompt,
-                        userText = conversationInput,
+                        userText = analysisInput,
                         thinkingEnabled = true,
                         maxOutputTokens = ANALYSIS_MAX_OUTPUT_TOKENS,
                     ),
+                    isAcceptable = { candidate ->
+                        candidate.matchesExpectedLanguageScript(explanationLanguageTag)
+                    },
                 )
 
                 _state.update {
                     it.copy(generationPhase = ConversationGenerationPhase.Composing)
                 }
 
-                val analyzedInput = """
-                    Conversation and current learner message:
-                    $conversationInput
-
-                    Completed language analysis:
-                    $analysis
-                """.trimIndent()
                 val naturalPhrase = if (includeNaturalPhrase) {
                     generateStageWithRetry(
                         LanguageModelRequest(
                             systemPrompt = naturalPhraseSystemPrompt,
-                            userText = analyzedInput,
+                            userText = buildNaturalPhraseInput(userText, analysis),
                             thinkingEnabled = false,
                             maxOutputTokens = NATURAL_PHRASE_MAX_OUTPUT_TOKENS,
                         ),
+                        rejectBoilerplate = true,
                         minimumLength = MIN_SHORT_STAGE_LENGTH,
+                        isAcceptable = { candidate ->
+                            val cleaned = candidate.cleanNaturalPhrase()
+                            cleaned.isPlausibleRewriteOf(userText) &&
+                                cleaned.matchesExpectedLanguageScript(targetLanguageTag)
+                        },
                     ).cleanNaturalPhrase()
                 } else {
                     null
@@ -148,11 +157,23 @@ class ConversationViewModel(
                     generateStageWithRetry(
                         LanguageModelRequest(
                             systemPrompt = replySystemPrompt,
-                            userText = analyzedInput,
+                            userText = buildReplyInput(
+                                conversationHistory = conversationHistory,
+                                userText = userText,
+                                analysis = analysis,
+                            ),
                             thinkingEnabled = false,
                             maxOutputTokens = REPLY_MAX_OUTPUT_TOKENS,
                         ),
                         rejectBoilerplate = true,
+                        isAcceptable = { candidate ->
+                            candidate.matchesExpectedLanguageScript(targetLanguageTag) &&
+                                currentState.messages
+                                .asSequence()
+                                .filter { it.role == ConversationRole.Assistant }
+                                .mapNotNull { it.conversationText }
+                                .none { previous -> candidate.isNearDuplicateOf(previous) }
+                        },
                     )
                 } else {
                     null
@@ -171,6 +192,7 @@ class ConversationViewModel(
                     role = ConversationRole.Assistant,
                     spokenText = parsedResponse.spokenText,
                     speechSegments = parsedResponse.speechSegments,
+                    conversationText = parsedResponse.conversationText,
                 )
                 _state.update {
                     it.copy(
@@ -195,6 +217,7 @@ class ConversationViewModel(
         request: LanguageModelRequest,
         rejectBoilerplate: Boolean = false,
         minimumLength: Int = MIN_USABLE_STAGE_LENGTH,
+        isAcceptable: (String) -> Boolean = { true },
     ): String {
         var lastFailure: Throwable? = null
 
@@ -203,7 +226,8 @@ class ConversationViewModel(
                 val text = engine.generate(request).text.cleanGenerationStage()
                 if (
                     text.length >= minimumLength &&
-                    (!rejectBoilerplate || !text.isKnownBoilerplateResponse())
+                    (!rejectBoilerplate || !text.isKnownBoilerplateResponse()) &&
+                    isAcceptable(text)
                 ) {
                     return text
                 }
@@ -258,6 +282,7 @@ internal data class ParsedTutorResponse(
     val visibleText: String,
     val spokenText: String?,
     val speechSegments: List<ConversationSpeechSegment>,
+    val conversationText: String?,
 )
 
 private val anySpeakMarkerRegex = Regex(
@@ -301,16 +326,17 @@ internal fun parseTutorResponse(rawText: String): ParsedTutorResponse {
                 ),
             )
         }.orEmpty(),
+        conversationText = spokenText,
     )
 }
 
 private const val MAX_GENERATION_ATTEMPTS = 3
 private const val MIN_SHORT_STAGE_LENGTH = 2
 private const val MIN_USABLE_STAGE_LENGTH = 12
-private const val ANALYSIS_MAX_OUTPUT_TOKENS = 512
-private const val NATURAL_PHRASE_MAX_OUTPUT_TOKENS = 96
-private const val REPLY_MAX_OUTPUT_TOKENS = 256
-private const val MAX_HISTORY_CHARS = 1_200
+private const val ANALYSIS_MAX_OUTPUT_TOKENS = 384
+private const val NATURAL_PHRASE_MAX_OUTPUT_TOKENS = 64
+private const val REPLY_MAX_OUTPUT_TOKENS = 192
+private const val MAX_HISTORY_CHARS = 800
 private const val MAX_CURRENT_MESSAGE_CHARS = 800
 
 private val generationStageHeadingRegex = Regex(
@@ -339,6 +365,11 @@ private fun String.isKnownBoilerplateResponse(): Boolean {
         "you are asking for help",
         "you're asking for help",
         "which is a good start",
+        "how can i assist you today",
+        "what can i help you with today",
+        "how can i help you assess",
+        "please provide some context",
+        "do you have any specific questions or content",
     ).any(normalized::contains)
 }
 
@@ -386,6 +417,7 @@ internal fun composeTutorResponse(
         visibleText = visibleText,
         spokenText = finalSegments.joinToString("\n\n") { it.text },
         speechSegments = finalSegments,
+        conversationText = reply?.cleanGenerationStage()?.takeIf { it.isNotBlank() },
     )
 }
 
@@ -404,31 +436,130 @@ internal fun naturalPhraseIntroduction(languageTag: String): String =
 private fun String.trimForTutorOutput(): String =
     trim(' ', '\t', '\r', '\n', '"', '\'', '“', '”')
 
-private fun buildModelInput(
-    messages: List<ConversationMessage>,
-    userText: String,
-): String {
-    if (messages.isEmpty()) return userText
+private fun languageName(languageTag: String): String =
+    Locale.forLanguageTag(languageTag)
+        .getDisplayLanguage(Locale.ENGLISH)
+        .ifBlank { languageTag }
 
+internal fun buildConversationHistory(
+    messages: List<ConversationMessage>,
+): String {
     var remainingCharacters = MAX_HISTORY_CHARS
-    val recentConversation = messages
+    return messages
         .asReversed()
         .mapNotNull { message ->
             if (remainingCharacters <= 0) return@mapNotNull null
 
+            val content = when (message.role) {
+                ConversationRole.User -> message.text
+                ConversationRole.Assistant -> message.conversationText ?: return@mapNotNull null
+            }.replace('\n', ' ').trim()
+            if (content.isEmpty()) return@mapNotNull null
+
             val role = if (message.role == ConversationRole.User) "Learner" else "Tutor"
-            val line = "$role: ${message.text.replace('\n', ' ')}"
+            val line = "$role: $content"
             val retainedLine = line.take(remainingCharacters)
             remainingCharacters -= retainedLine.length
             retainedLine
         }
         .asReversed()
         .joinToString("\n")
-    return """
-        Recent conversation:
-        $recentConversation
+}
 
-        Current learner message:
+private fun buildAnalysisInput(
+    conversationHistory: String,
+    userText: String,
+): String {
+    val historySection = conversationHistory.takeIf { it.isNotBlank() }?.let {
+        "RECENT DIALOGUE — context only, do not analyze it:\n$it\n\n"
+    }.orEmpty()
+    return """
+        ${historySection}CURRENT LEARNER PHRASE — analyze only this:
         ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
     """.trimIndent()
+}
+
+private fun buildNaturalPhraseInput(userText: String, analysis: String): String =
+    """
+        CURRENT LEARNER PHRASE:
+        ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
+
+        LANGUAGE ANALYSIS — use only as guidance:
+        $analysis
+
+        Rewrite this exact CURRENT LEARNER PHRASE:
+        ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
+    """.trimIndent()
+
+private fun buildReplyInput(
+    conversationHistory: String,
+    userText: String,
+    analysis: String,
+): String {
+    val historySection = conversationHistory.takeIf { it.isNotBlank() }?.let {
+        "RECENT DIALOGUE — context only:\n$it\n\n"
+    }.orEmpty()
+    return """
+        ${historySection}CURRENT LEARNER PHRASE:
+        ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
+
+        LANGUAGE ANALYSIS — do not repeat this in your reply:
+        $analysis
+
+        Reply now to this exact CURRENT LEARNER PHRASE:
+        ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
+    """.trimIndent()
+}
+
+private val wordRegex = Regex("[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*")
+private val rewriteStopWords = setOf(
+    "a", "an", "am", "are", "can", "could", "do", "for", "i", "in", "is", "me",
+    "my", "of", "one", "please", "the", "to", "you", "your", "yeah",
+)
+private val tutorReplyOpeners = listOf(
+    "how can i help",
+    "how can i assist",
+    "please provide",
+    "do you have any specific",
+    "would you like to start",
+)
+
+private fun String.normalizedWords(): Set<String> =
+    wordRegex.findAll(lowercase())
+        .map { it.value }
+        .filterNot { it in rewriteStopWords }
+        .toSet()
+
+internal fun String.isPlausibleRewriteOf(original: String): Boolean {
+    val normalizedCandidate = lowercase().trim()
+    if (tutorReplyOpeners.any(normalizedCandidate::contains)) return false
+
+    val originalWords = original.normalizedWords()
+    val candidateWords = normalizedWords()
+    if (originalWords.size < 2) return candidateWords.size <= originalWords.size + 1
+    return originalWords.intersect(candidateWords).isNotEmpty()
+}
+
+internal fun String.matchesExpectedLanguageScript(languageTag: String): Boolean {
+    val expectedCharacters = when (languageTag.substringBefore('-').lowercase()) {
+        "ru", "kk" -> count { it in '\u0400'..'\u052f' }
+        "zh" -> count { it in '\u3400'..'\u9fff' }
+        else -> count {
+            it in 'A'..'Z' || it in 'a'..'z' || it in '\u00c0'..'\u024f'
+        }
+    }
+    val allLetters = count { it.isLetter() }
+    return allLetters == 0 || expectedCharacters * 2 >= allLetters
+}
+
+private fun String.isNearDuplicateOf(previous: String): Boolean {
+    val normalizedCurrent = lowercase().replace(Regex("\\s+"), " ").trim()
+    val normalizedPrevious = previous.lowercase().replace(Regex("\\s+"), " ").trim()
+    if (normalizedCurrent == normalizedPrevious) return true
+
+    val currentWords = normalizedCurrent.normalizedWords()
+    val previousWords = normalizedPrevious.normalizedWords()
+    val union = currentWords union previousWords
+    if (union.isEmpty()) return false
+    return (currentWords intersect previousWords).size.toDouble() / union.size >= 0.72
 }

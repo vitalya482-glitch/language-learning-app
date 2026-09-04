@@ -84,6 +84,10 @@ class ConversationResponseParserTest {
             ConversationSpeechLanguage.Target,
             result.speechSegments[2].language,
         )
+        assertEquals(
+            "Yes. They are an American rock band. What is your favorite song?",
+            result.conversationText,
+        )
     }
 
     @Test
@@ -111,5 +115,50 @@ class ConversationResponseParserTest {
             "USER:\nHow are you?\n\nAI TUTOR:\nI'm well.",
             formatConversationForClipboard(messages),
         )
+    }
+
+    @Test
+    fun `model history contains replies but excludes teaching sections`() {
+        val messages = listOf(
+            ConversationMessage(1, "Can you check my English level?", ConversationRole.User),
+            ConversationMessage(
+                id = 2,
+                text = "Long analysis and correction.\n\nTell me about your job.",
+                role = ConversationRole.Assistant,
+                conversationText = "Tell me about your job.",
+            ),
+            ConversationMessage(3, "I am a source manager.", ConversationRole.User),
+        )
+
+        assertEquals(
+            "Learner: Can you check my English level?\n" +
+                "Tutor: Tell me about your job.\n" +
+                "Learner: I am a source manager.",
+            buildConversationHistory(messages),
+        )
+    }
+
+    @Test
+    fun `rejects a tutor reply masquerading as a natural rewrite`() {
+        assertFalse(
+            "How can I help you assess your English level today?"
+                .isPlausibleRewriteOf("Can you please check my English level?"),
+        )
+        assertEquals(
+            true,
+            "Could you please assess my English level?"
+                .isPlausibleRewriteOf("Can you please check my English level?"),
+        )
+        assertFalse(
+            "Hello, I'm a beginner. Let me start a conversation."
+                .isPlausibleRewriteOf("Hello"),
+        )
+    }
+
+    @Test
+    fun `validates the requested output script`() {
+        assertEquals(true, "Фраза построена правильно.".matchesExpectedLanguageScript("ru-RU"))
+        assertFalse("The phrase is correct.".matchesExpectedLanguageScript("ru-RU"))
+        assertEquals(true, "The phrase is correct.".matchesExpectedLanguageScript("en-US"))
     }
 }

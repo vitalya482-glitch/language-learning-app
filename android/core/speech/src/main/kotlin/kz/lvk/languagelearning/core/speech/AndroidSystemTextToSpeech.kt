@@ -241,6 +241,8 @@ class AndroidSystemTextToSpeech(context: Context) : AutoCloseable {
         })
     }
 
+    fun isSpeakingNow(): Boolean = engine?.isSpeaking == true
+
     private fun finishUtterance(utteranceId: String?, errorMessage: String? = null) {
         if (utteranceId == null || !activeUtteranceId.compareAndSet(utteranceId, null)) return
 
