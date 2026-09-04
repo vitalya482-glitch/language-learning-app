@@ -14,6 +14,7 @@ interface SettingsRepository {
     fun setLearningLevel(level: LearningLevel)
     fun setUserDisplayName(name: String?)
     fun setTtsVoice(language: AppLanguage, voiceId: String?)
+    fun setExplanationTtsVoice(language: AppLanguage, voiceId: String?)
 }
 
 class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository {
@@ -85,6 +86,28 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
         }
     }
 
+    override fun setExplanationTtsVoice(language: AppLanguage, voiceId: String?) {
+        val key = explanationVoicePreferenceKey(language.tag)
+        preferences.edit().apply {
+            if (voiceId == null) {
+                remove(key)
+            } else {
+                putString(key, voiceId)
+            }
+        }.apply()
+
+        _settings.update { current ->
+            val updatedVoices = current.explanationTtsVoiceIdsByLanguage.toMutableMap().apply {
+                if (voiceId == null) {
+                    remove(language.tag)
+                } else {
+                    put(language.tag, voiceId)
+                }
+            }
+            current.copy(explanationTtsVoiceIdsByLanguage = updatedVoices)
+        }
+    }
+
     private fun loadSettings(): AppSettings {
         val nativeTag = preferences.getString(
             KEY_NATIVE_LANGUAGE,
@@ -112,12 +135,19 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
                 ?.let { language.tag to it }
         }.toMap()
 
+        val explanationVoices = LanguageCatalog.all.mapNotNull { language ->
+            preferences.getString(explanationVoicePreferenceKey(language.tag), null)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { language.tag to it }
+        }.toMap()
+
         return AppSettings(
             nativeLanguageTag = nativeTag,
             targetLanguageTag = targetTag,
             learningLevel = level,
             userDisplayName = userDisplayName,
             ttsVoiceIdsByLanguage = voices,
+            explanationTtsVoiceIdsByLanguage = explanationVoices,
         )
     }
 
@@ -150,6 +180,9 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
     private fun voicePreferenceKey(languageTag: String): String =
         "$KEY_TTS_VOICE_PREFIX$languageTag"
 
+    private fun explanationVoicePreferenceKey(languageTag: String): String =
+        "$KEY_EXPLANATION_TTS_VOICE_PREFIX$languageTag"
+
     private companion object {
         const val PREFERENCES_NAME = "language_learning_app_settings"
         const val KEY_NATIVE_LANGUAGE = "native_language_tag"
@@ -157,6 +190,7 @@ class SharedPreferencesSettingsRepository(context: Context) : SettingsRepository
         const val KEY_LEARNING_LEVEL = "learning_level"
         const val KEY_USER_DISPLAY_NAME = "user_display_name"
         const val KEY_TTS_VOICE_PREFIX = "tts_voice_"
+        const val KEY_EXPLANATION_TTS_VOICE_PREFIX = "explanation_tts_voice_"
         const val LEGACY_TTS_PREFERENCES_NAME = "language_learning_system_tts"
     }
 }
