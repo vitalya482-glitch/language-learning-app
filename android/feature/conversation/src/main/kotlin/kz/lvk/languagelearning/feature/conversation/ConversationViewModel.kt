@@ -31,12 +31,14 @@ class ConversationViewModel(
         The learner's CEFR level is $learningLevel.
 
         For each learner message:
-        - If there is a mistake, first show a corrected natural version in the target language.
+        - If there is a mistake, show a corrected natural version in the target language.
         - Briefly explain the important correction in the learner's native language.
-        - If useful for a beginner, give a short translation or hint in the native language.
-        - Continue the conversation with one short natural reply or question in the target language.
-        - If the learner's phrase is already correct, say so briefly and continue the conversation.
-        - Keep the whole answer concise and practical. Do not output hidden reasoning or a thinking section.
+        - If useful, give one short translation or hint in the native language.
+        - Continue with one short natural reply or question in the target language.
+        - If the learner writes in the native language, translate the intended phrase into the target language and continue.
+        - If the learner's phrase is already correct, say so briefly and continue.
+        - Keep the complete answer under about 80 words.
+        - Do not output hidden reasoning or a thinking section.
     """.trimIndent()
 
     init {
