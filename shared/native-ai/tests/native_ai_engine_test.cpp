@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <stdexcept>
-#include <string>
 
 int main() {
     using lvk::language_learning::ModelDescriptor;
@@ -11,17 +10,17 @@ int main() {
     NativeAiEngine engine;
     assert(!engine.is_loaded());
 
-    engine.load(ModelDescriptor{
-        "native-smoke-test",
-        "Native smoke test",
-        "native://smoke-test",
-    });
-    assert(engine.is_loaded());
-
-    const std::string response = engine.generate("Be concise", "Hello");
-    assert(response == "Native C++ engine is working. Received: Hello");
-
-    engine.unload();
+    bool rejected_missing_model = false;
+    try {
+        engine.load(ModelDescriptor{
+            "missing-test-model",
+            "Missing test model",
+            "/definitely/not/a/model.gguf",
+        });
+    } catch (const std::invalid_argument&) {
+        rejected_missing_model = true;
+    }
+    assert(rejected_missing_model);
     assert(!engine.is_loaded());
 
     bool rejected_generation = false;
