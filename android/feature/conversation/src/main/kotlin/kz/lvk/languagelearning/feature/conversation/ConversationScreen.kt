@@ -368,7 +368,7 @@ private fun SpeechInputControl(
             },
             modifier = Modifier
                 .size(104.dp)
-                .pointerInput(speechState.isAvailable) {
+                .pointerInput(speechState.isAvailable, useNativeLanguage) {
                     detectTapGestures(
                         onPress = {
                             if (speechState.isAvailable) {
