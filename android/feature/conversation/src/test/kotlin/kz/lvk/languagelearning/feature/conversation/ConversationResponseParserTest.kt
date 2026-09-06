@@ -188,4 +188,19 @@ class ConversationResponseParserTest {
         assertFalse("Hello, where are you?".isMeaningfullyDifferentFrom("Hello where are you"))
         assertTrue("I'm here".isMeaningfullyDifferentFrom("Im here"))
     }
+
+    @Test
+    fun `recognizes a correct A1 greeting without punctuation`() {
+        assertTrue("Hello how are you".isClearlyCorrectA1Phrase("en-US"))
+        assertTrue("Hello how are you".looksLikeQuestion("en-US"))
+        assertFalse("I manager company".isClearlyCorrectA1Phrase("en-US"))
+    }
+
+    @Test
+    fun `uses concise Russian A1 feedback before continuing`() {
+        assertEquals(
+            "Грамматика верна, ты правильно задал вопрос.\nДавай продолжим диалог:",
+            correctA1Feedback(languageTag = "ru-RU", isQuestion = true),
+        )
+    }
 }

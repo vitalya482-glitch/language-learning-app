@@ -19,7 +19,7 @@ class ConversationViewModel(
     private val model: LocalModelDescriptor?,
     nativeLanguageTag: String,
     private val targetLanguageTag: String,
-    learningLevel: String,
+    private val learningLevel: String,
     includePhraseAnalysis: Boolean,
     private val includeNaturalPhrase: Boolean,
     includeConversationReply: Boolean,
@@ -61,6 +61,8 @@ class ConversationViewModel(
         You are a friendly $targetLanguageName conversation partner. Respond directly to the text
         marked CURRENT LEARNER PHRASE in 1-3 concise sentences in $targetLanguageName
         ($targetLanguageTag), then ask one specific question that naturally continues its topic.
+        The learner's level is $learningLevel; use vocabulary and sentence structure appropriate
+        for that level. At A1, keep the reply especially simple and short.
         Answer the learner's literal question before asking your question. The recent dialogue is
         context only. Never say that you understand the context, repeat an earlier answer, ask how
         you can help, ask the learner to provide more details when a direct answer is possible,
@@ -152,35 +154,43 @@ class ConversationViewModel(
                             thinkingEnabled = true,
                             maxOutputTokens = ANALYSIS_MAX_OUTPUT_TOKENS,
                         ),
-                        acceptLastNonEmptyAfterRetries = true,
                         isAcceptable = { candidate ->
-                            parseLanguageAnalysis(candidate).text
-                                .matchesExpectedLanguageScript(explanationLanguageTag)
+                            val parsed = parseLanguageAnalysis(candidate)
+                            parsed.needsCorrection != null &&
+                                parsed.text.matchesExpectedLanguageScript(explanationLanguageTag)
                         },
                     )
                 } catch (_: NoUsableModelStageException) {
                     unavailableAnalysisText(explanationLanguageTag)
                 }
                 val parsedAnalysis = parseLanguageAnalysis(rawAnalysis)
-                val analysis = parsedAnalysis.text.ifBlank {
-                    analysisVerdictFallback(
-                        needsCorrection = parsedAnalysis.needsCorrection,
-                        languageTag = explanationLanguageTag,
-                    )
-                }
+                val preliminaryAnalysis = parsedAnalysis.text
+                    .takeIf { it.matchesExpectedLanguageScript(explanationLanguageTag) }
+                    .orEmpty()
+                    .ifBlank {
+                        analysisVerdictFallback(
+                            needsCorrection = parsedAnalysis.needsCorrection,
+                            languageTag = explanationLanguageTag,
+                        )
+                    }
+                val isClearlyCorrectA1Phrase =
+                    learningLevel.equals("A1", ignoreCase = true) &&
+                        userText.isClearlyCorrectA1Phrase(targetLanguageTag)
 
                 _state.update {
                     it.copy(generationPhase = ConversationGenerationPhase.Composing)
                 }
 
                 val naturalPhrase = if (
-                    includeNaturalPhrase && parsedAnalysis.needsCorrection != false
+                    includeNaturalPhrase &&
+                    parsedAnalysis.needsCorrection != false &&
+                    !isClearlyCorrectA1Phrase
                 ) {
                     try {
                         generateStageWithRetry(
                             LanguageModelRequest(
                                 systemPrompt = naturalPhraseSystemPrompt,
-                                userText = buildNaturalPhraseInput(userText, analysis),
+                                userText = buildNaturalPhraseInput(userText, preliminaryAnalysis),
                                 thinkingEnabled = false,
                                 maxOutputTokens = NATURAL_PHRASE_MAX_OUTPUT_TOKENS,
                             ),
@@ -200,6 +210,27 @@ class ConversationViewModel(
                     }
                 } else {
                     null
+                }
+                val effectiveNeedsCorrection = if (isClearlyCorrectA1Phrase) {
+                    false
+                } else {
+                    parsedAnalysis.needsCorrection ?: naturalPhrase?.let { true }
+                }
+                val analysis = if (
+                    learningLevel.equals("A1", ignoreCase = true) &&
+                    effectiveNeedsCorrection == false
+                ) {
+                    correctA1Feedback(
+                        languageTag = explanationLanguageTag,
+                        isQuestion = userText.looksLikeQuestion(targetLanguageTag),
+                    )
+                } else {
+                    preliminaryAnalysis.ifBlank {
+                        analysisVerdictFallback(
+                            needsCorrection = effectiveNeedsCorrection,
+                            languageTag = explanationLanguageTag,
+                        )
+                    }
                 }
                 val reply = if (includeConversationReply) {
                     try {
@@ -557,17 +588,81 @@ private fun unavailableAnalysisText(languageTag: String): String =
 
 private fun analysisVerdictFallback(needsCorrection: Boolean?, languageTag: String): String =
     when (languageTag.substringBefore('-').lowercase()) {
-        "ru" -> if (needsCorrection == false) {
-            "Фраза звучит естественно и понятна."
-        } else {
-            "Фразу стоит немного исправить."
+        "ru" -> when (needsCorrection) {
+            false -> "Фраза звучит естественно и понятна."
+            true -> "Фразу стоит немного исправить."
+            null -> "Не удалось уверенно завершить проверку фразы, но диалог можно продолжить."
         }
-        else -> if (needsCorrection == false) {
-            "The phrase sounds natural and clear."
-        } else {
-            "This phrase would benefit from a small correction."
+        else -> when (needsCorrection) {
+            false -> "The phrase sounds natural and clear."
+            true -> "This phrase would benefit from a small correction."
+            null -> "The phrase check was inconclusive, but we can continue the conversation."
         }
     }
+
+internal fun correctA1Feedback(languageTag: String, isQuestion: Boolean): String =
+    when (languageTag.substringBefore('-').lowercase()) {
+        "ru" -> if (isQuestion) {
+            "Грамматика верна, ты правильно задал вопрос.\nДавай продолжим диалог:"
+        } else {
+            "Грамматика верна, ты правильно построил фразу.\nДавай продолжим диалог:"
+        }
+        "de" -> "Die Grammatik stimmt, und der Satz ist richtig formuliert.\nSetzen wir den Dialog fort:"
+        "es" -> "La gramática es correcta y la frase está bien formulada.\nContinuemos el diálogo:"
+        "fr" -> "La grammaire est correcte et la phrase est bien formulée.\nContinuons le dialogue :"
+        "it" -> "La grammatica è corretta e la frase è formulata bene.\nContinuiamo il dialogo:"
+        "kk" -> "Грамматика дұрыс, сөйлемді дұрыс құрдың.\nДиалогті жалғастырайық:"
+        "zh" -> "语法正确，句子表达得很好。\n让我们继续对话："
+        else -> "The grammar is correct, and you phrased it well.\nLet's continue the conversation:"
+    }
+
+private fun String.normalizedA1Phrase(): String =
+    lowercase()
+        .replace('’', '\'')
+        .replace(Regex("[^\\p{L}\\p{N}']+"), " ")
+        .trim()
+
+internal fun String.isClearlyCorrectA1Phrase(languageTag: String): Boolean {
+    if (languageTag.substringBefore('-').lowercase() != "en") return false
+    return normalizedA1Phrase() in setOf(
+        "hello",
+        "hi",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "how are you",
+        "hello how are you",
+        "hi how are you",
+        "hello where are you",
+        "what is your name",
+        "what's your name",
+        "where are you",
+        "where do you live",
+        "how old are you",
+        "thank you",
+        "thanks",
+        "you're welcome",
+        "nice to meet you",
+    )
+}
+
+internal fun String.looksLikeQuestion(languageTag: String): Boolean {
+    if (trimEnd().endsWith('?')) return true
+    val words = normalizedA1Phrase().split(' ').filter { it.isNotBlank() }
+    if (words.isEmpty()) return false
+    val questionOpeners = when (languageTag.substringBefore('-').lowercase()) {
+        "en" -> setOf(
+            "am", "are", "can", "could", "did", "do", "does", "have", "has", "how",
+            "is", "may", "should", "was", "were", "what", "when", "where", "which",
+            "who", "why", "will", "would",
+        )
+        else -> emptySet()
+    }
+    val questionAfterGreeting = words.first() in setOf("hello", "hi", "hey") &&
+        words.getOrNull(1)?.let { it in questionOpeners } == true
+    return words.first() in questionOpeners || questionAfterGreeting
+}
 
 private fun fallbackConversationReply(languageTag: String): String =
     when (languageTag.substringBefore('-').lowercase()) {
