@@ -1101,7 +1101,7 @@ internal fun formatConversationForClipboard(messages: List<ConversationMessage>)
             ConversationRole.User -> "USER"
             ConversationRole.Assistant -> "AI TUTOR"
         }
-        "$role:\n${message.text.trim()}"
+        "[${message.timeLabel}] $role:\n${message.text.trim()}"
     }
 
 @Composable
@@ -1120,10 +1120,18 @@ private fun ConversationMessageBubble(message: ConversationMessage) {
             },
             shape = MaterialTheme.shapes.large,
         ) {
-            Text(
-                text = message.text,
+            Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
+                horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+            ) {
+                Text(text = message.text)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = message.timeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
