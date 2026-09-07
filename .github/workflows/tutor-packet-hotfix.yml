@@ -1,0 +1,114 @@
+name: One-shot tutor packet hotfix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tutor-packet-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply structured tutor packet fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('android/feature/conversation/src/main/kotlin/kz/lvk/languagelearning/feature/conversation/ConversationViewModel.kt')
+          test_path = Path('android/feature/conversation/src/test/kotlin/kz/lvk/languagelearning/feature/conversation/ConversationResponseParserTest.kt')
+
+          source = source_path.read_text(encoding='utf-8')
+          tests = test_path.read_text(encoding='utf-8')
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          source = replace_once(
+              source,
+              '            appendLine("Preserve the learner\'s exact intended meaning in CORRECTION.")\n',
+              '            appendLine("Preserve the learner\'s exact intended meaning in CORRECTION.")\n'
+              '            appendLine("CORRECTION must contain only the corrected phrase itself, never an explanation.")\n'
+              '            appendLine("WHY must contain only the explanation and must never contain REPLY.")\n'
+              '            appendLine("REPLY must contain only the conversational reply, never correction metadata.")\n',
+              'teacher packet prompt rules',
+          )
+
+          source = replace_once(
+              source,
+              '        val correction = packet.correction\n'
+              '            ?.sanitizeCorrection(userText, targetLanguageTag)\n'
+              '            ?.takeIf { includeNaturalPhrase }\n'
+              '        val needsCorrection = packet.needsCorrection ?: (correction != null)\n',
+              '        val correction = packet.correction\n'
+              '            ?.extractCorrectionPhrase()\n'
+              '            ?.sanitizeCorrection(userText, targetLanguageTag)\n'
+              '            ?.takeIf { includeNaturalPhrase }\n'
+              '        val needsCorrection = packet.needsCorrection\n',
+              'correction state handling',
+          )
+
+          source = replace_once(
+              source,
+              '        val reply = if (includeConversationReply) {\n'
+              '            (packet.reply ?: rawPacket)\n'
+              '                ?.sanitizeReply(userText, targetLanguageTag, learningLevel, previousReplies)\n',
+              '        val reply = if (includeConversationReply) {\n'
+              '            packet.reply\n'
+              '                ?.sanitizeReply(userText, targetLanguageTag, learningLevel, previousReplies)\n',
+              'raw packet reply fallback',
+          )
+
+          source = replace_once(
+              source,
+              '                val text = engine.generate(request).text.cleanGenerationStage()\n',
+              '                val text = engine.generate(request).text.prepareRawModelResponse()\n',
+              'raw model response cleanup',
+          )
+
+          source = replace_once(
+              source,
+              'private fun String.sanitizeCorrection(original: String, languageTag: String): String? {\n',
+              '''internal fun String.prepareRawModelResponse(): String = trim()\n\nprivate val quotedTextRegex = Regex("""[\\"“]([^\\"”]+)[\\"”]""")\n\ninternal fun String.extractCorrectionPhrase(): String {\n    val cleaned = cleanGenerationStage()\n    val looksLikeExplanation = listOf(\n        " is incorrect",\n        "correct phrase",\n        "corrected phrase",\n        "should be",\n        "say ",\n    ).any { marker -> cleaned.contains(marker, ignoreCase = true) }\n    if (!looksLikeExplanation) return cleaned\n\n    val quotedParts = quotedTextRegex.findAll(cleaned)\n        .map { it.groupValues[1].trim() }\n        .filter { it.isNotBlank() }\n        .toList()\n    return quotedParts.lastOrNull() ?: cleaned\n}\n\nprivate fun String.sanitizeCorrection(original: String, languageTag: String): String? {\n''',
+              'correction extraction helper',
+          )
+
+          test_insert = '''\n    @Test\n    fun `structured response preparation preserves reply field`() {\n        val raw = """\n            STATUS: FIX\n            CORRECTION: I like to travel.\n            WHY: Add an object or complement after "I like".\n            REPLY: Travelling is fun. Which place do you like most?\n        """.trimIndent()\n\n        val result = parseTeacherPacket(raw.prepareRawModelResponse())\n\n        assertEquals("Add an object or complement after \\"I like\\".", result.why)\n        assertEquals("Travelling is fun. Which place do you like most?", result.reply)\n    }\n\n    @Test\n    fun `verbose correction field yields only corrected phrase`() {\n        val result = "\\\"I like\\\" is incorrect. The correct phrase should be \\\"I like to travel.\\\""\n            .extractCorrectionPhrase()\n\n        assertEquals("I like to travel.", result)\n    }\n\n    @Test\n    fun `empty teacher packet remains inconclusive`() {\n        assertNull(parseTeacherPacket("").needsCorrection)\n    }\n'''
+
+          marker = '\n    @Test\n    fun `short greeting echo is detected`() {'
+          if marker not in tests:
+              raise SystemExit('test insertion marker not found')
+          tests = tests.replace(marker, test_insert + marker, 1)
+
+          source_path.write_text(source, encoding='utf-8')
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test --no-daemon
+
+      - name: Commit hotfix and remove one-shot workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/tutor-packet-hotfix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/feature/conversation/src/main/kotlin/kz/lvk/languagelearning/feature/conversation/ConversationViewModel.kt \
+                  android/feature/conversation/src/test/kotlin/kz/lvk/languagelearning/feature/conversation/ConversationResponseParserTest.kt \
+                  .github/workflows/tutor-packet-hotfix.yml
+          git commit -m 'Fix structured tutor packet parsing'
+          git push origin HEAD:main
