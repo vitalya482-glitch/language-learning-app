@@ -114,7 +114,7 @@ private fun ConversationDiagnosticsDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Здесь видны USER, итоговый AI TUTOR и каждый сырой вызов локальной модели с точным временем.",
+                    text = "Видны конец речи, задержка распознавания, каждый сырой запрос/ответ модели и итоговый AI TUTOR.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -182,5 +182,5 @@ internal fun formatDiagnosticLog(events: List<ModelDiagnosticEvent>): String =
     }
 
 private fun formatDiagnosticTimestamp(timestampEpochMillis: Long): String =
-    SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
+    SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
         .format(Date(timestampEpochMillis))
