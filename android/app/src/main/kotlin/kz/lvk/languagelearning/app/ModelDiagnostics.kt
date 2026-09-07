@@ -9,6 +9,7 @@ import kz.lvk.languagelearning.core.ai.LanguageModelEngine
 import kz.lvk.languagelearning.core.ai.LanguageModelRequest
 import kz.lvk.languagelearning.core.ai.LanguageModelResponse
 import kz.lvk.languagelearning.core.ai.LocalModelDescriptor
+import kz.lvk.languagelearning.core.speech.SpeechSubmissionTiming
 
 data class ModelDiagnosticEvent(
     val id: Long,
@@ -27,14 +28,57 @@ class ModelDiagnostics {
     }
 
     fun record(source: String, text: String) {
-        val event = ModelDiagnosticEvent(
-            id = nextId.incrementAndGet(),
+        val cleanedText = text.trim()
+        if (source == "USER") {
+            val speechTiming = SpeechSubmissionTiming.peekMatching(cleanedText)
+            if (speechTiming != null) {
+                appendEvents(
+                    listOf(
+                        ModelDiagnosticEvent(
+                            id = nextId.incrementAndGet(),
+                            timestampEpochMillis = speechTiming.speechEndedAtEpochMillis,
+                            source = "USER",
+                            text = cleanedText,
+                        ),
+                        ModelDiagnosticEvent(
+                            id = nextId.incrementAndGet(),
+                            timestampEpochMillis = speechTiming.resultReceivedAtEpochMillis,
+                            source = "STT RESULT",
+                            text = "Android speech finalization: ${speechTiming.finalizationDurationMillis} ms",
+                        ),
+                    ),
+                )
+                return
+            }
+        }
+
+        appendEvent(
             timestampEpochMillis = System.currentTimeMillis(),
             source = source,
-            text = text.trim(),
+            text = cleanedText,
         )
+    }
+
+    private fun appendEvent(
+        timestampEpochMillis: Long,
+        source: String,
+        text: String,
+    ) {
+        appendEvents(
+            listOf(
+                ModelDiagnosticEvent(
+                    id = nextId.incrementAndGet(),
+                    timestampEpochMillis = timestampEpochMillis,
+                    source = source,
+                    text = text,
+                ),
+            ),
+        )
+    }
+
+    private fun appendEvents(newEvents: List<ModelDiagnosticEvent>) {
         _events.update { current ->
-            (current + event).takeLast(MAX_EVENTS)
+            (current + newEvents).takeLast(MAX_EVENTS)
         }
     }
 
@@ -47,6 +91,8 @@ class LoggingLanguageModelEngine(
     private val delegate: LanguageModelEngine,
     private val diagnostics: ModelDiagnostics,
 ) : LanguageModelEngine {
+    private val nextGenerationCallId = AtomicLong(0L)
+
     override suspend fun load(model: LocalModelDescriptor) {
         diagnostics.record(
             source = "ENGINE LOAD START",
@@ -66,8 +112,10 @@ class LoggingLanguageModelEngine(
 
     override suspend fun generate(request: LanguageModelRequest): LanguageModelResponse {
         val stage = detectStage(request.systemPrompt)
+        val callId = nextGenerationCallId.incrementAndGet()
+        val startedAtNanos = System.nanoTime()
         diagnostics.record(
-            source = "$stage START",
+            source = "$stage REQUEST #$callId",
             text = buildString {
                 append("maxOutputTokens=")
                 append(request.maxOutputTokens)
@@ -80,14 +128,16 @@ class LoggingLanguageModelEngine(
 
         return try {
             delegate.generate(request).also { response ->
+                val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
                 diagnostics.record(
-                    source = "$stage RESPONSE",
-                    text = response.text,
+                    source = "$stage RESPONSE #$callId · ${elapsedMs} ms",
+                    text = response.text.ifBlank { "(empty response)" },
                 )
             }
         } catch (error: Throwable) {
+            val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
             diagnostics.record(
-                source = "$stage ERROR",
+                source = "$stage ERROR #$callId · ${elapsedMs} ms",
                 text = error.message ?: error::class.java.simpleName,
             )
             throw error
