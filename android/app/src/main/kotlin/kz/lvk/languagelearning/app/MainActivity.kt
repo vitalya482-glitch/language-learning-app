@@ -5,14 +5,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kz.lvk.languagelearning.core.ai.LocalModelDescriptor
 import kz.lvk.languagelearning.core.designsystem.LanguageLearningTheme
-import kz.lvk.languagelearning.core.models.LocalModelCatalog
+import kz.lvk.languagelearning.core.models.LocalModelStatus
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
 import kz.lvk.languagelearning.feature.conversation.ConversationScreen
 import kz.lvk.languagelearning.feature.conversation.ConversationViewModel
@@ -27,22 +32,34 @@ class MainActivity : ComponentActivity() {
         setContent {
             var showConversation by rememberSaveable { mutableStateOf(false) }
             var showSettings by rememberSaveable { mutableStateOf(false) }
+            val compositionScope = rememberCoroutineScope()
+            var engineUnloadJob by remember { mutableStateOf<Job?>(null) }
             val mainViewModel: MainViewModel = viewModel(
                 factory = MainViewModel.Factory(app.container.updateManager),
             )
             val updateState by mainViewModel.updateState.collectAsStateWithLifecycle()
             val appSettings by app.container.settingsRepository.settings.collectAsStateWithLifecycle()
+            val localModelsState by app.container.localModelManager.state.collectAsStateWithLifecycle()
             val targetSpeechLanguage = SpeechLanguage(appSettings.targetLanguageTag)
             val nativeSpeechLanguage = SpeechLanguage(appSettings.nativeLanguageTag)
 
             LanguageLearningTheme {
                 when {
                     showConversation -> {
-                        val modelSpec = LocalModelCatalog.Qwen3_0_6B_Q4KM
-                        val modelPath = app.container.localModelManager.installedPath(modelSpec.id)
+                        // Keep the model fixed for the lifetime of this conversation. Download
+                        // progress updates also refresh available RAM and must not replace a model
+                        // that is already loaded by the native engine.
+                        val modelEntry = remember(showConversation) {
+                            localModelsState.entries.firstOrNull {
+                                it.spec.id == localModelsState.selectedModelId &&
+                                    it.status is LocalModelStatus.Installed
+                            }
+                        }
+                        val modelSpec = modelEntry?.spec
+                        val modelPath = (modelEntry?.status as? LocalModelStatus.Installed)?.localPath
                         val modelDescriptor = modelPath?.let { path ->
                             LocalModelDescriptor(
-                                id = modelSpec.id,
+                                id = checkNotNull(modelSpec).id,
                                 displayName = modelSpec.displayName,
                                 localPath = path,
                             )
@@ -63,6 +80,8 @@ class MainActivity : ComponentActivity() {
                             append('-')
                             append(appSettings.tutorExplanationLanguage.name)
                             append('-')
+                            append(modelSpec?.id ?: "none")
+                            append('-')
                             append(modelPath?.hashCode() ?: 0)
                         }
                         val conversationViewModel: ConversationViewModel = viewModel(
@@ -79,12 +98,27 @@ class MainActivity : ComponentActivity() {
                                 explanationLanguageTag = appSettings.explanationLanguage.tag,
                             ),
                         )
+                        LaunchedEffect(conversationKey, conversationViewModel) {
+                            conversationViewModel.loadEngine()
+                        }
                         val conversationState by conversationViewModel.state.collectAsStateWithLifecycle()
 
-                        BackHandler { showConversation = false }
+                        val closeConversation = {
+                            conversationViewModel.closeSession()
+                            showConversation = false
+                            engineUnloadJob = compositionScope.launch {
+                                try {
+                                    app.container.languageModelEngine.unload()
+                                } finally {
+                                    app.container.localModelManager.refresh()
+                                }
+                            }
+                            Unit
+                        }
+                        BackHandler(onBack = closeConversation)
                         ConversationScreen(
                             state = conversationState,
-                            onBack = { showConversation = false },
+                            onBack = closeConversation,
                             onSendMessage = conversationViewModel::sendMessage,
                             onRetryEngine = conversationViewModel::retry,
                             speechLanguage = targetSpeechLanguage,
@@ -130,8 +164,25 @@ class MainActivity : ComponentActivity() {
                             versionName = BuildConfig.VERSION_NAME,
                             versionCode = BuildConfig.VERSION_CODE.toLong(),
                             updateState = updateState,
-                            onStartLearning = { showConversation = true },
-                            onSettings = { showSettings = true },
+                            onStartLearning = {
+                                compositionScope.launch {
+                                    val pendingUnload = engineUnloadJob
+                                    pendingUnload?.join()
+                                    if (engineUnloadJob === pendingUnload) engineUnloadJob = null
+                                    app.container.localModelManager.refresh()
+                                    app.container.localModelManager.prepareSelectedModelForUse()
+                                    showConversation = true
+                                }
+                            },
+                            onSettings = {
+                                compositionScope.launch {
+                                    val pendingUnload = engineUnloadJob
+                                    pendingUnload?.join()
+                                    if (engineUnloadJob === pendingUnload) engineUnloadJob = null
+                                    app.container.localModelManager.refresh()
+                                    showSettings = true
+                                }
+                            },
                             onCheckForUpdates = mainViewModel::checkForUpdates,
                             onInstallUpdate = mainViewModel::installUpdate,
                         )

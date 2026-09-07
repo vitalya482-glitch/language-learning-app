@@ -36,6 +36,7 @@ fun LocalModelsScreen(
     onBack: () -> Unit,
     onDownload: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onSelect: (String) -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -78,6 +79,20 @@ fun LocalModelsScreen(
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                Text(
+                    text = stringResource(
+                        R.string.models_device_memory,
+                        formatBytes(state.totalRamBytes),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.models_available_memory,
+                        formatBytes(state.availableRamBytes),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 Spacer(Modifier.height(18.dp))
                 HorizontalDivider()
             }
@@ -90,6 +105,8 @@ fun LocalModelsScreen(
                     entry = entry,
                     onDownload = { onDownload(entry.spec.id) },
                     onDelete = { onDelete(entry.spec.id) },
+                    onSelect = { onSelect(entry.spec.id) },
+                    isSelected = state.selectedModelId == entry.spec.id,
                 )
                 HorizontalDivider()
             }
@@ -102,6 +119,8 @@ private fun ModelEntry(
     entry: LocalModelEntry,
     onDownload: () -> Unit,
     onDelete: () -> Unit,
+    onSelect: () -> Unit,
+    isSelected: Boolean,
 ) {
     val spec = entry.spec
 
@@ -124,6 +143,27 @@ private fun ModelEntry(
         )
         Text(
             text = stringResource(
+                R.string.models_memory_required,
+                formatBytes(spec.minimumRamBytes),
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!entry.isMemoryCompatible) {
+            Text(
+                text = stringResource(R.string.models_memory_incompatible),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        } else if (!entry.canLoadNow && entry.status is LocalModelStatus.Installed && !isSelected) {
+            Text(
+                text = stringResource(R.string.models_memory_busy),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Text(
+            text = stringResource(
                 R.string.models_metadata,
                 formatBytes(spec.estimatedSizeBytes),
                 spec.sourceLabel,
@@ -142,6 +182,7 @@ private fun ModelEntry(
                 LvkPrimaryButton(
                     text = stringResource(R.string.models_download),
                     onClick = onDownload,
+                    enabled = entry.isMemoryCompatible,
                 )
             }
 
@@ -182,11 +223,19 @@ private fun ModelEntry(
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Text(
-                    text = stringResource(R.string.models_inference_next),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (isSelected) {
+                    Text(
+                        text = stringResource(R.string.models_active),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    LvkPrimaryButton(
+                        text = stringResource(R.string.models_use),
+                        onClick = onSelect,
+                        enabled = entry.isMemoryCompatible && entry.canLoadNow,
+                    )
+                }
                 LvkOutlinedButton(
                     text = stringResource(R.string.models_delete),
                     onClick = onDelete,
@@ -202,6 +251,7 @@ private fun ModelEntry(
                 LvkPrimaryButton(
                     text = stringResource(R.string.models_retry),
                     onClick = onDownload,
+                    enabled = entry.isMemoryCompatible,
                 )
                 LvkOutlinedButton(
                     text = stringResource(R.string.models_delete_partial),

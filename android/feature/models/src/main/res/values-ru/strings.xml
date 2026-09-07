@@ -3,6 +3,8 @@
     <string name="models_back">Назад</string>
     <string name="models_note">Модели скачиваются отдельно от APK и хранятся только на этом устройстве.</string>
     <string name="models_free_space">Свободно для моделей: %1$s</string>
+    <string name="models_device_memory">Оперативная память устройства: %1$s</string>
+    <string name="models_available_memory">Сейчас доступно ОЗУ: %1$s</string>
     <string name="models_recommended_name">Рекомендуемая · %1$s</string>
     <string name="models_metadata">≈ %1$s · %2$s · %3$s</string>
     <string name="models_not_installed">Не установлена</string>
@@ -11,7 +13,11 @@
     <string name="models_verifying">Загрузка завершена. Проверяем SHA-256…</string>
     <string name="models_cancel_delete">Отменить и удалить</string>
     <string name="models_installed">Установлена · %1$s</string>
-    <string name="models_inference_next">Файл модели готов. Подключение к нативному inference-движку — следующий этап.</string>
+    <string name="models_memory_required">Требуется ОЗУ: не менее %1$s</string>
+    <string name="models_memory_incompatible">Для надёжной работы этой модели на устройстве недостаточно оперативной памяти.</string>
+    <string name="models_memory_busy">Сейчас свободной памяти недостаточно. Закройте другие тяжёлые приложения и откройте этот экран снова.</string>
+    <string name="models_active">Используется сейчас</string>
+    <string name="models_use">Использовать эту модель</string>
     <string name="models_delete">Удалить модель</string>
     <string name="models_retry">Повторить</string>
     <string name="models_delete_partial">Удалить недокачанный файл</string>

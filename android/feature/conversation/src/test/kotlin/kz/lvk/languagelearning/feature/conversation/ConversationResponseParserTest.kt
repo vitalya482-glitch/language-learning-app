@@ -203,4 +203,80 @@ class ConversationResponseParserTest {
             correctA1Feedback(languageTag = "ru-RU", isQuestion = true),
         )
     }
+
+    @Test
+    fun `detects a repeated tutor question inside a different reply`() {
+        val previous = "Yes, please tell me about your day. What did you do today?"
+        val candidate = "That sounds good. What did you do today?"
+
+        assertTrue(candidate.repeatsQuestionFrom(previous))
+        assertFalse("That sounds good. What did you enjoy most?".repeatsQuestionFrom(previous))
+    }
+
+    @Test
+    fun `detects when a reply echoes the learner sentence`() {
+        assertTrue(
+            "Yes, today I went in the mountains and walked a lot. What happened next?"
+                .echoesLearnerPhrase("Today I went in mountains and walk a lot"),
+        )
+        assertFalse(
+            "That sounds like an active day! What did you enjoy most?"
+                .echoesLearnerPhrase("Today I went in mountains and walk a lot"),
+        )
+    }
+
+    @Test
+    fun `reply prompt contains the current phrase once and excludes analysis`() {
+        val input = buildReplyInput(
+            conversationHistory = "Learner: Hello\nTutor: Hi! How are you?",
+            userText = "My day was busy",
+        )
+
+        assertEquals(1, Regex("My day was busy").findAll(input).count())
+        assertFalse(input.contains("LANGUAGE ANALYSIS"))
+    }
+
+    @Test
+    fun `A1 reply requires exactly one continuing question`() {
+        assertTrue("I'm well, thanks. How are you?".hasExpectedQuestionCount("A1"))
+        assertFalse("I'm well, thanks.".hasExpectedQuestionCount("A1"))
+        assertFalse("How are you? What are you doing?".hasExpectedQuestionCount("A1"))
+    }
+
+    @Test
+    fun `fallback continues the current topic instead of repeating a previous question`() {
+        val previous = listOf(
+            "Yes, please tell me about your day. What happened first?",
+            "That sounds like an active day! Which place did you like most?",
+        )
+
+        val result = fallbackConversationReply(
+            userText = "What about you, how is your day going?",
+            languageTag = "en-US",
+            learningLevel = "A1",
+            previousReplies = previous,
+        )
+
+        assertEquals(
+            "My day is going well, thank you. What was the best part of your day?",
+            result,
+        )
+        assertTrue(result.hasExpectedQuestionCount("A1"))
+        assertTrue(previous.none(result::repeatsQuestionFrom))
+    }
+
+    @Test
+    fun `fallback skips a generic reply that was already used`() {
+        val previous = listOf("That sounds interesting. What happened next?")
+
+        val result = fallbackConversationReply(
+            userText = "I read a book",
+            languageTag = "en-US",
+            learningLevel = "A1",
+            previousReplies = previous,
+        )
+
+        assertFalse(result.isNearDuplicateOf(previous.single()))
+        assertFalse(result.repeatsQuestionFrom(previous.single()))
+    }
 }

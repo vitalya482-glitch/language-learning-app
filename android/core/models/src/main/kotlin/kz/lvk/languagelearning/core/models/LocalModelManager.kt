@@ -1,5 +1,6 @@
 package kz.lvk.languagelearning.core.models
 
+import android.app.ActivityManager
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
@@ -9,6 +10,7 @@ import java.security.MessageDigest
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,20 +27,26 @@ class LocalModelManager(context: Context) {
     private val modelsDir = (appContext.getExternalFilesDir(null) ?: appContext.filesDir)
         .resolve("models")
         .apply { mkdirs() }
+    private val totalRamBytes = readTotalRamBytes()
 
     private val statuses = mutableMapOf<String, LocalModelStatus>()
+    private val downloadJobs = mutableMapOf<String, Job>()
+    private var selectedModelId = preferences.getString(KEY_SELECTED_MODEL_ID, null)
     private val _state = MutableStateFlow(LocalModelsState())
     val state: StateFlow<LocalModelsState> = _state.asStateFlow()
 
     init {
         LocalModelCatalog.all.forEach { spec ->
             val finalFile = finalFile(spec)
-            statuses[spec.id] = if (finalFile.isFile) {
+            statuses[spec.id] = if (isCompleteModelFile(spec, finalFile)) {
                 LocalModelStatus.Installed(finalFile.absolutePath, finalFile.length())
+            } else if (finalFile.isFile) {
+                LocalModelStatus.Error("Файл модели неполный. Удалите его и скачайте заново.")
             } else {
                 LocalModelStatus.NotInstalled
             }
         }
+        ensureSelectedModel(requireAvailableMemory = true)
         publishState()
         resumeKnownDownloads()
     }
@@ -46,8 +54,24 @@ class LocalModelManager(context: Context) {
     fun download(modelId: String) {
         val spec = LocalModelCatalog.byId(modelId) ?: return
         if (statuses[modelId] is LocalModelStatus.Downloading) return
-        if (finalFile(spec).isFile) {
+        if (isCompleteModelFile(spec, finalFile(spec))) {
             refresh()
+            return
+        }
+
+        if (statuses.any { (id, status) -> id != modelId && status is LocalModelStatus.Downloading }) {
+            statuses[modelId] = LocalModelStatus.Error(
+                "Сначала дождитесь завершения другой загрузки модели.",
+            )
+            publishState()
+            return
+        }
+
+        if (!isMemoryCompatible(spec)) {
+            statuses[modelId] = LocalModelStatus.Error(
+                "Для этой модели нужно не менее ${humanBytes(spec.minimumRamBytes)} оперативной памяти.",
+            )
+            publishState()
             return
         }
 
@@ -61,8 +85,16 @@ class LocalModelManager(context: Context) {
             return
         }
 
+        val staleFiles = listOf(finalFile(spec), partialFile(spec))
+            .filter(File::exists)
+        if (staleFiles.any { file -> !file.delete() }) {
+            statuses[modelId] = LocalModelStatus.Error(
+                "Не удалось удалить незавершённую загрузку. Перезапустите приложение и повторите.",
+            )
+            publishState()
+            return
+        }
         val partial = partialFile(spec)
-        if (partial.exists()) partial.delete()
 
         val request = DownloadManager.Request(Uri.parse(spec.downloadUrl))
             .setTitle(spec.displayName)
@@ -81,11 +113,13 @@ class LocalModelManager(context: Context) {
         )
         publishState()
 
-        scope.launch { monitorDownload(spec, downloadId) }
+        startMonitoring(spec, downloadId)
     }
 
     fun delete(modelId: String) {
         val spec = LocalModelCatalog.byId(modelId) ?: return
+        val monitorJob = downloadJobs.remove(spec.id)
+        monitorJob?.cancel()
         val downloadId = savedDownloadId(spec.id)
         if (downloadId != null) {
             downloadManager.remove(downloadId)
@@ -93,21 +127,48 @@ class LocalModelManager(context: Context) {
         }
 
         scope.launch {
-            withContext(Dispatchers.IO) {
-                finalFile(spec).delete()
-                partialFile(spec).delete()
+            monitorJob?.join()
+            val deleted = withContext(Dispatchers.IO) {
+                listOf(finalFile(spec), partialFile(spec))
+                    .map { file -> !file.exists() || file.delete() }
+                    .all { it }
+            }
+            if (!deleted) {
+                statuses[spec.id] = LocalModelStatus.Error(
+                    "Не удалось удалить файл модели. Перезапустите приложение и повторите.",
+                )
+                publishState()
+                return@launch
             }
             statuses[spec.id] = LocalModelStatus.NotInstalled
+            if (selectedModelId == spec.id) {
+                selectedModelId = null
+                ensureSelectedModel()
+            }
             publishState()
         }
+    }
+
+    fun select(modelId: String) {
+        val spec = LocalModelCatalog.byId(modelId) ?: return
+        if (
+            statuses[modelId] !is LocalModelStatus.Installed ||
+            !isMemoryCompatible(spec) ||
+            !canLoadNow(spec)
+        ) return
+        selectedModelId = modelId
+        preferences.edit().putString(KEY_SELECTED_MODEL_ID, modelId).apply()
+        publishState()
     }
 
     fun refresh() {
         LocalModelCatalog.all.forEach { spec ->
             if (statuses[spec.id] !is LocalModelStatus.Downloading) {
                 val file = finalFile(spec)
-                statuses[spec.id] = if (file.isFile) {
+                statuses[spec.id] = if (isCompleteModelFile(spec, file)) {
                     LocalModelStatus.Installed(file.absolutePath, file.length())
+                } else if (file.isFile) {
+                    LocalModelStatus.Error("Файл модели неполный. Удалите его и скачайте заново.")
                 } else if (statuses[spec.id] is LocalModelStatus.Error) {
                     statuses.getValue(spec.id)
                 } else {
@@ -118,6 +179,12 @@ class LocalModelManager(context: Context) {
         publishState()
     }
 
+    /** Revalidates the saved choice after the previous native model has been unloaded. */
+    fun prepareSelectedModelForUse() {
+        ensureSelectedModel(requireAvailableMemory = true)
+        publishState()
+    }
+
     fun installedPath(modelId: String): String? {
         return (statuses[modelId] as? LocalModelStatus.Installed)?.localPath
     }
@@ -125,7 +192,7 @@ class LocalModelManager(context: Context) {
     private fun resumeKnownDownloads() {
         LocalModelCatalog.all.forEach { spec ->
             val downloadId = savedDownloadId(spec.id) ?: return@forEach
-            if (finalFile(spec).isFile) {
+            if (isCompleteModelFile(spec, finalFile(spec))) {
                 clearDownloadId(spec.id)
                 return@forEach
             }
@@ -134,7 +201,7 @@ class LocalModelManager(context: Context) {
                 downloadedBytes = 0L,
                 totalBytes = spec.estimatedSizeBytes,
             )
-            scope.launch { monitorDownload(spec, downloadId) }
+            startMonitoring(spec, downloadId)
         }
         publishState()
     }
@@ -233,6 +300,10 @@ class LocalModelManager(context: Context) {
                 localPath = file.absolutePath,
                 sizeBytes = file.length(),
             )
+            if (selectedModelId == null && canLoadNow(spec)) {
+                selectedModelId = spec.id
+                preferences.edit().putString(KEY_SELECTED_MODEL_ID, spec.id).apply()
+            }
         }.onFailure { error ->
             statuses[spec.id] = LocalModelStatus.Error(
                 error.message ?: "Не удалось проверить локальную модель.",
@@ -242,16 +313,73 @@ class LocalModelManager(context: Context) {
     }
 
     private fun publishState() {
+        ensureSelectedModel()
+        val availableRamBytes = readAvailableRamBytes()
         _state.value = LocalModelsState(
             entries = LocalModelCatalog.all.map { spec ->
                 LocalModelEntry(
                     spec = spec,
                     status = statuses[spec.id] ?: LocalModelStatus.NotInstalled,
+                    isMemoryCompatible = isMemoryCompatible(spec),
+                    canLoadNow = availableRamBytes >= spec.minimumAvailableRamBytes,
                 )
             },
             availableBytes = availableBytes(),
+            totalRamBytes = totalRamBytes,
+            availableRamBytes = availableRamBytes,
+            selectedModelId = selectedModelId,
         )
     }
+
+    private fun startMonitoring(spec: LocalModelSpec, downloadId: Long) {
+        downloadJobs.remove(spec.id)?.cancel()
+        val job = scope.launch { monitorDownload(spec, downloadId) }
+        downloadJobs[spec.id] = job
+        job.invokeOnCompletion {
+            scope.launch {
+                if (downloadJobs[spec.id] === job) downloadJobs.remove(spec.id)
+            }
+        }
+    }
+
+    private fun ensureSelectedModel(requireAvailableMemory: Boolean = false) {
+        val currentIsUsable = LocalModelCatalog.byId(selectedModelId.orEmpty())?.let { spec ->
+            statuses[spec.id] is LocalModelStatus.Installed &&
+                isMemoryCompatible(spec) &&
+                (!requireAvailableMemory || canLoadNow(spec))
+        } == true
+        if (currentIsUsable) return
+
+        selectedModelId = LocalModelCatalog.all
+            .filter { spec ->
+                statuses[spec.id] is LocalModelStatus.Installed && isMemoryCompatible(spec)
+                    && canLoadNow(spec)
+            }
+            .maxByOrNull(LocalModelSpec::qualityRank)
+            ?.id
+        preferences.edit().apply {
+            if (selectedModelId == null) remove(KEY_SELECTED_MODEL_ID)
+            else putString(KEY_SELECTED_MODEL_ID, selectedModelId)
+        }.apply()
+    }
+
+    private fun isMemoryCompatible(spec: LocalModelSpec): Boolean =
+        totalRamBytes > 0L && totalRamBytes >= spec.minimumRamBytes
+
+    private fun canLoadNow(spec: LocalModelSpec): Boolean =
+        readAvailableRamBytes() >= spec.minimumAvailableRamBytes
+
+    private fun readTotalRamBytes(): Long = runCatching {
+        val memoryInfo = ActivityManager.MemoryInfo()
+        appContext.getSystemService(ActivityManager::class.java).getMemoryInfo(memoryInfo)
+        memoryInfo.totalMem
+    }.getOrDefault(0L)
+
+    private fun readAvailableRamBytes(): Long = runCatching {
+        val memoryInfo = ActivityManager.MemoryInfo()
+        appContext.getSystemService(ActivityManager::class.java).getMemoryInfo(memoryInfo)
+        memoryInfo.availMem
+    }.getOrDefault(0L)
 
     private fun availableBytes(): Long = runCatching {
         StatFs(modelsDir.absolutePath).availableBytes
@@ -260,6 +388,9 @@ class LocalModelManager(context: Context) {
     private fun finalFile(spec: LocalModelSpec): File = modelsDir.resolve(spec.fileName)
 
     private fun partialFile(spec: LocalModelSpec): File = modelsDir.resolve("${spec.fileName}.download")
+
+    private fun isCompleteModelFile(spec: LocalModelSpec, file: File): Boolean =
+        file.isFile && file.length() == spec.estimatedSizeBytes
 
     private fun saveDownloadId(modelId: String, downloadId: Long) {
         preferences.edit().putLong(downloadKey(modelId), downloadId).apply()
@@ -302,7 +433,8 @@ class LocalModelManager(context: Context) {
 
     private companion object {
         const val PREFERENCES_NAME = "language_learning_local_models"
-        const val DOWNLOAD_HEADROOM_BYTES = 96L * 1024L * 1024L
+        const val KEY_SELECTED_MODEL_ID = "selected_model_id"
+        const val DOWNLOAD_HEADROOM_BYTES = 512L * 1024L * 1024L
 
         fun humanBytes(bytes: Long): String {
             val mb = bytes / 1_000_000.0

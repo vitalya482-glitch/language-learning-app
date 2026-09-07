@@ -18,6 +18,8 @@ namespace lvk::language_learning {
 namespace {
 
 constexpr int32_t kContextTokens = 2048;
+constexpr int32_t kBatchTokens = kContextTokens;
+constexpr int32_t kMicroBatchTokens = 256;
 constexpr int32_t kMinGeneratedTokens = 32;
 constexpr int32_t kMaxGeneratedTokens = 512;
 
@@ -41,7 +43,10 @@ int32_t inference_threads() {
 llama_context_params mobile_context_params() {
     llama_context_params params = llama_context_default_params();
     params.n_ctx = kContextTokens;
-    params.n_batch = kContextTokens;
+    // The logical batch must accept the complete prompt; a smaller physical micro-batch reduces
+    // peak RAM on phones while llama.cpp splits the work internally.
+    params.n_batch = kBatchTokens;
+    params.n_ubatch = kMicroBatchTokens;
     params.n_threads = inference_threads();
     params.n_threads_batch = inference_threads();
     params.no_perf = false;

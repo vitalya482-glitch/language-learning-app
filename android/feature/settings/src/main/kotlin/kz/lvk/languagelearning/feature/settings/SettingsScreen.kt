@@ -70,6 +70,9 @@ fun SettingsScreen(
     val context = LocalContext.current
     var showLocalModels by rememberSaveable { mutableStateOf(false) }
     val localModelsState by localModelManager.state.collectAsStateWithLifecycle()
+    LaunchedEffect(showLocalModels) {
+        if (showLocalModels) localModelManager.refresh()
+    }
 
     if (showLocalModels) {
         LocalModelsScreen(
@@ -77,6 +80,7 @@ fun SettingsScreen(
             onBack = { showLocalModels = false },
             onDownload = localModelManager::download,
             onDelete = localModelManager::delete,
+            onSelect = localModelManager::select,
         )
         return
     }
