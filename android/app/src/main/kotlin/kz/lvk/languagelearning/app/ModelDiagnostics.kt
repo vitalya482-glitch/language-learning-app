@@ -30,22 +30,24 @@ class ModelDiagnostics {
 
     fun record(source: String, text: String) {
         val cleanedText = text.trim()
+        val submittedAtEpochMillis = System.currentTimeMillis()
+
         if (source == "USER") {
-            val speechTiming = SpeechSubmissionTiming.peekMatching(cleanedText)
+            val speechTiming = SpeechSubmissionTiming.consumeMatching(cleanedText)
             if (speechTiming != null) {
                 appendEvents(
                     listOf(
                         ModelDiagnosticEvent(
                             id = nextId.incrementAndGet(),
-                            timestampEpochMillis = speechTiming.speechEndedAtEpochMillis,
-                            source = "USER",
-                            text = cleanedText,
-                        ),
-                        ModelDiagnosticEvent(
-                            id = nextId.incrementAndGet(),
                             timestampEpochMillis = speechTiming.resultReceivedAtEpochMillis,
                             source = "STT RESULT",
                             text = "Android speech finalization: ${speechTiming.finalizationDurationMillis} ms",
+                        ),
+                        ModelDiagnosticEvent(
+                            id = nextId.incrementAndGet(),
+                            timestampEpochMillis = submittedAtEpochMillis,
+                            source = "USER",
+                            text = cleanedText,
                         ),
                     ),
                 )
@@ -54,7 +56,7 @@ class ModelDiagnostics {
         }
 
         appendEvent(
-            timestampEpochMillis = System.currentTimeMillis(),
+            timestampEpochMillis = submittedAtEpochMillis,
             source = source,
             text = cleanedText,
         )
