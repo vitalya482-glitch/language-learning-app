@@ -56,6 +56,34 @@ class ConversationResponseParserTest {
     }
 
     @Test
+    fun `structured response preparation preserves reply field`() {
+        val raw = """
+            STATUS: FIX
+            CORRECTION: I like to travel.
+            WHY: Add an object or complement after "I like".
+            REPLY: Travelling is fun. Which place do you like most?
+        """.trimIndent()
+
+        val result = parseTeacherPacket(raw.prepareRawModelResponse())
+
+        assertEquals("Add an object or complement after \"I like\".", result.why)
+        assertEquals("Travelling is fun. Which place do you like most?", result.reply)
+    }
+
+    @Test
+    fun `verbose correction field yields only corrected phrase`() {
+        val result = "\"I like\" is incorrect. The correct phrase should be \"I like to travel.\""
+            .extractCorrectionPhrase()
+
+        assertEquals("I like to travel.", result)
+    }
+
+    @Test
+    fun `empty teacher packet remains inconclusive`() {
+        assertNull(parseTeacherPacket("").needsCorrection)
+    }
+
+    @Test
     fun `short greeting echo is detected`() {
         assertTrue("Hi, how are you? I'm learning English.".echoesLearnerPhrase("hi how are you?"))
         assertFalse("I'm doing well, thank you. What are you doing today?".echoesLearnerPhrase("hi how are you?"))

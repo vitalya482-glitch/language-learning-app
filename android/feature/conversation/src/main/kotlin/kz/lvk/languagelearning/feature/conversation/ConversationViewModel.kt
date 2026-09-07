@@ -64,6 +64,9 @@ class ConversationViewModel(
             appendLine("Use FIX only for a real grammar or word-choice problem.")
             appendLine("Ignore capitalization, punctuation, and harmless spoken brevity.")
             appendLine("Preserve the learner's exact intended meaning in CORRECTION.")
+            appendLine("CORRECTION must contain only the corrected phrase itself, never an explanation.")
+            appendLine("WHY must contain only the explanation and must never contain REPLY.")
+            appendLine("REPLY must contain only the conversational reply, never correction metadata.")
             appendLine("Never translate CORRECTION or REPLY into ${nativeLanguageName}.")
             appendLine("WHY must stay in English; the app translates it later when needed.")
             appendLine("Do not use Markdown, lists, headings, extra labels, or hidden reasoning.")
@@ -312,9 +315,10 @@ class ConversationViewModel(
         )
         val packet = rawPacket?.let(::parseTeacherPacket) ?: ParsedTeacherPacket()
         val correction = packet.correction
+            ?.extractCorrectionPhrase()
             ?.sanitizeCorrection(userText, targetLanguageTag)
             ?.takeIf { includeNaturalPhrase }
-        val needsCorrection = packet.needsCorrection ?: (correction != null)
+        val needsCorrection = packet.needsCorrection
 
         _state.update { it.copy(generationPhase = ConversationGenerationPhase.Composing) }
 
@@ -341,7 +345,7 @@ class ConversationViewModel(
         }
 
         val reply = if (includeConversationReply) {
-            (packet.reply ?: rawPacket)
+            packet.reply
                 ?.sanitizeReply(userText, targetLanguageTag, learningLevel, previousReplies)
                 ?: fallbackConversationReply(
                     userText = userText,
@@ -394,7 +398,7 @@ class ConversationViewModel(
     private suspend fun generateRawWithEmptyRetry(request: LanguageModelRequest): String? {
         repeat(MAX_EMPTY_RESPONSE_ATTEMPTS) {
             try {
-                val text = engine.generate(request).text.cleanGenerationStage()
+                val text = engine.generate(request).text.prepareRawModelResponse()
                 if (text.isNotBlank()) return text
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
@@ -600,6 +604,29 @@ internal fun buildReplyInput(history: String, userText: String): String {
         ${historySection}CURRENT LEARNER PHRASE:
         ${userText.take(MAX_CURRENT_MESSAGE_CHARS)}
     """.trimIndent()
+}
+
+internal fun String.prepareRawModelResponse(): String = trim()
+
+private val quotedTextRegex = Regex("""[\"“]([^\"”]+)[\"”]""")
+
+internal fun String.extractCorrectionPhrase(): String {
+    val raw = replace("**", "").replace("`", "").trim()
+    val looksLikeExplanation = listOf(
+        " is incorrect",
+        "correct phrase",
+        "corrected phrase",
+        "should be",
+        "say ",
+    ).any { marker -> raw.contains(marker, ignoreCase = true) }
+    if (looksLikeExplanation) {
+        val quotedParts = quotedTextRegex.findAll(raw)
+            .map { it.groupValues[1].trim() }
+            .filter { it.isNotBlank() }
+            .toList()
+        quotedParts.lastOrNull()?.let { return it }
+    }
+    return raw.cleanGenerationStage()
 }
 
 private fun String.sanitizeCorrection(original: String, languageTag: String): String? {
