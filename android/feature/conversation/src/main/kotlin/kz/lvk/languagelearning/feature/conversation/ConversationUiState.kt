@@ -1,5 +1,14 @@
 package kz.lvk.languagelearning.feature.conversation
 
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+
+private val conversationTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("HH:mm:ss")
+
+private fun currentConversationTime(): String =
+    LocalTime.now().format(conversationTimeFormatter)
+
 data class ConversationUiState(
     val isEngineReady: Boolean = false,
     val isGenerating: Boolean = false,
@@ -12,6 +21,7 @@ data class ConversationMessage(
     val id: Long,
     val text: String,
     val role: ConversationRole,
+    val timeLabel: String = currentConversationTime(),
     val spokenText: String? = null,
     val speechSegments: List<ConversationSpeechSegment> = emptyList(),
     val conversationText: String? = null,
