@@ -41,6 +41,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
     }
 
     private var lastLanguage: SpeechLanguage = SpeechLanguages.English
+    private var speechEndedAtEpochMillis: Long? = null
 
     private val _state = MutableStateFlow(SpeechRecognitionState(isAvailable = available))
     val state: StateFlow<SpeechRecognitionState> = _state.asStateFlow()
@@ -62,6 +63,9 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             }
 
             override fun onEndOfSpeech() {
+                if (speechEndedAtEpochMillis == null) {
+                    speechEndedAtEpochMillis = System.currentTimeMillis()
+                }
                 _state.update {
                     it.copy(
                         isListening = false,
@@ -72,6 +76,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
             }
 
             override fun onError(error: Int) {
+                speechEndedAtEpochMillis = null
                 val languageDownloadRequired =
                     error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
@@ -92,6 +97,16 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
 
             override fun onResults(results: Bundle?) {
                 val text = firstResult(results)
+                val resultReceivedAtEpochMillis = System.currentTimeMillis()
+                val endedAtEpochMillis =
+                    speechEndedAtEpochMillis ?: resultReceivedAtEpochMillis
+                SpeechSubmissionTiming.publish(
+                    text = text,
+                    speechEndedAtEpochMillis = endedAtEpochMillis,
+                    resultReceivedAtEpochMillis = resultReceivedAtEpochMillis,
+                )
+                speechEndedAtEpochMillis = null
+
                 _state.update {
                     it.copy(
                         isListening = false,
@@ -130,6 +145,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         }
 
         lastLanguage = language
+        speechEndedAtEpochMillis = null
         _state.update {
             it.copy(
                 isListening = true,
@@ -151,6 +167,9 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
 
     fun stopListening() {
         if (_state.value.isListening) {
+            if (speechEndedAtEpochMillis == null) {
+                speechEndedAtEpochMillis = System.currentTimeMillis()
+            }
             _state.update {
                 it.copy(
                     isListening = false,
@@ -187,6 +206,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
         }
 
         lastLanguage = language
+        speechEndedAtEpochMillis = null
         _state.update {
             it.copy(
                 isListening = false,
@@ -213,6 +233,7 @@ class AndroidOnDeviceSpeechRecognizer(context: Context) : AutoCloseable {
     }
 
     override fun close() {
+        speechEndedAtEpochMillis = null
         recognizer?.destroy()
     }
 
