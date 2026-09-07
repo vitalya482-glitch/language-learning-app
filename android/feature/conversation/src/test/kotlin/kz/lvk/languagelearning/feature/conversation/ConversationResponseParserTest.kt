@@ -108,12 +108,22 @@ class ConversationResponseParserTest {
     @Test
     fun `formats the complete dialog for debugging`() {
         val messages = listOf(
-            ConversationMessage(1, "How are you?", ConversationRole.User),
-            ConversationMessage(2, "I'm well.", ConversationRole.Assistant),
+            ConversationMessage(
+                id = 1,
+                text = "How are you?",
+                role = ConversationRole.User,
+                timeLabel = "10:00:00",
+            ),
+            ConversationMessage(
+                id = 2,
+                text = "I'm well.",
+                role = ConversationRole.Assistant,
+                timeLabel = "10:00:02",
+            ),
         )
 
         assertEquals(
-            "USER:\nHow are you?\n\nAI TUTOR:\nI'm well.",
+            "[10:00:00] USER:\nHow are you?\n\n[10:00:02] AI TUTOR:\nI'm well.",
             formatConversationForClipboard(messages),
         )
     }
