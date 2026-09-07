@@ -84,6 +84,48 @@ class ConversationResponseParserTest {
     }
 
     @Test
+    fun `real correction overrides model OK status`() {
+        assertEquals(
+            true,
+            resolveCorrectionState(
+                modelNeedsCorrection = false,
+                validatedCorrection = "They were shown last month.",
+                correctionExpected = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `FIX without usable correction becomes inconclusive when correction is expected`() {
+        assertNull(
+            resolveCorrectionState(
+                modelNeedsCorrection = true,
+                validatedCorrection = null,
+                correctionExpected = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `FIX remains valid when correction display is disabled`() {
+        assertEquals(
+            true,
+            resolveCorrectionState(
+                modelNeedsCorrection = true,
+                validatedCorrection = null,
+                correctionExpected = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `Russian translation failure fallback never exposes English WHY`() {
+        val fallback = translationFailureFeedback("ru-RU")
+        assertTrue(fallback.contains("перевести"))
+        assertFalse(fallback.contains("This phrase"))
+    }
+
+    @Test
     fun `short greeting echo is detected`() {
         assertTrue("Hi, how are you? I'm learning English.".echoesLearnerPhrase("hi how are you?"))
         assertFalse("I'm doing well, thank you. What are you doing today?".echoesLearnerPhrase("hi how are you?"))

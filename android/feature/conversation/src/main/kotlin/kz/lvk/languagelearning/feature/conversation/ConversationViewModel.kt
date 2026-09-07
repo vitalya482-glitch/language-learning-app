@@ -314,11 +314,15 @@ class ConversationViewModel(
             ),
         )
         val packet = rawPacket?.let(::parseTeacherPacket) ?: ParsedTeacherPacket()
-        val correction = packet.correction
+        val validatedCorrection = packet.correction
             ?.extractCorrectionPhrase()
             ?.sanitizeCorrection(userText, targetLanguageTag)
-            ?.takeIf { includeNaturalPhrase }
-        val needsCorrection = packet.needsCorrection
+        val correction = validatedCorrection?.takeIf { includeNaturalPhrase }
+        val needsCorrection = resolveCorrectionState(
+            modelNeedsCorrection = packet.needsCorrection,
+            validatedCorrection = validatedCorrection,
+            correctionExpected = includeNaturalPhrase,
+        )
 
         _state.update { it.copy(generationPhase = ConversationGenerationPhase.Composing) }
 
@@ -332,13 +336,7 @@ class ConversationViewModel(
                     englishWhy?.let { translateExplanationIfNeeded(it) }
                         ?: correctionFallback(explanationLanguageTag)
                 }
-                null -> {
-                    packet.why
-                        ?.cleanGenerationStage()
-                        ?.takeIf { it.isNotBlank() }
-                        ?.let { translateExplanationIfNeeded(it) }
-                        ?: inconclusiveFeedback(explanationLanguageTag)
-                }
+                null -> inconclusiveFeedback(explanationLanguageTag)
             }
         } else {
             null
@@ -392,7 +390,7 @@ class ConversationViewModel(
         )
             ?.cleanGenerationStage()
             ?.takeIf { it.matchesExpectedLanguageScript(explanationLanguageTag) }
-        return translated ?: englishText
+        return translated ?: translationFailureFeedback(explanationLanguageTag)
     }
 
     private suspend fun generateRawWithEmptyRetry(request: LanguageModelRequest): String? {
@@ -439,6 +437,16 @@ class ConversationViewModel(
             ) as T
         }
     }
+}
+
+internal fun resolveCorrectionState(
+    modelNeedsCorrection: Boolean?,
+    validatedCorrection: String?,
+    correctionExpected: Boolean,
+): Boolean? = when {
+    validatedCorrection != null -> true
+    correctionExpected && modelNeedsCorrection == true -> null
+    else -> modelNeedsCorrection
 }
 
 internal data class ParsedTutorResponse(
@@ -913,6 +921,18 @@ private fun correctFeedback(languageTag: String): String =
         "kk" -> "Сөйлем дұрыс әрі табиғи естіледі."
         "zh" -> "这句话正确而且自然。"
         else -> "The phrase sounds correct and natural."
+    }
+
+internal fun translationFailureFeedback(languageTag: String): String =
+    when (languageTag.substringBefore('-').lowercase()) {
+        "ru" -> "Фразу стоит исправить, но подробное объяснение перевести не удалось."
+        "de" -> "Der Satz sollte korrigiert werden, aber die Erklärung konnte nicht übersetzt werden."
+        "es" -> "La frase necesita corrección, pero no se pudo traducir la explicación."
+        "fr" -> "La phrase doit être corrigée, mais l’explication n’a pas pu être traduite."
+        "it" -> "La frase va corretta, ma non è stato possibile tradurre la spiegazione."
+        "kk" -> "Сөйлемді түзету керек, бірақ түсіндірмені аудару мүмкін болмады."
+        "zh" -> "这句话需要修改，但无法翻译详细说明。"
+        else -> "This phrase needs correction, but the explanation could not be translated."
     }
 
 private fun correctionFallback(languageTag: String): String =
