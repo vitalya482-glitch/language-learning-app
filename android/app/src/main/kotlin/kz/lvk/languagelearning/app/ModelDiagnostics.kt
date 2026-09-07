@@ -160,6 +160,9 @@ class LoggingLanguageModelEngine(
     }
 
     private fun detectStage(systemPrompt: String): String = when {
+        systemPrompt.contains("TUTOR_PACKET_V1", ignoreCase = true) -> "MODEL TEACHER"
+        systemPrompt.contains("TRANSLATE_EXPLANATION_V1", ignoreCase = true) -> "MODEL TRANSLATION"
+        systemPrompt.contains("REPLY_ONLY_V1", ignoreCase = true) -> "MODEL REPLY"
         systemPrompt.contains("VERDICT:", ignoreCase = true) -> "MODEL ANALYSIS"
         systemPrompt.contains("Rewrite only", ignoreCase = true) -> "MODEL NATURAL PHRASE"
         systemPrompt.contains("conversation partner", ignoreCase = true) -> "MODEL REPLY"

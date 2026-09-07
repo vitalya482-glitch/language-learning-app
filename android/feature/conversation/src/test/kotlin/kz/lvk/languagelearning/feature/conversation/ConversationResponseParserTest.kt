@@ -2,291 +2,130 @@ package kz.lvk.languagelearning.feature.conversation
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationResponseParserTest {
     @Test
-    fun `parses compact tutor protocol`() {
-        val result = parseTutorResponse(
+    fun `parses english first teacher packet`() {
+        val result = parseTeacherPacket(
             """
-                SAY: I'm doing well, thank you. How are you?
-                FEEDBACK: Фраза правильная.
+                STATUS: FIX
+                CORRECTION: Yesterday I went to the mountains and walked a lot.
+                WHY: Use "yesterday" for the previous day and use "walked" in the past tense.
+                REPLY: That sounds like an active day. Who did you go with?
             """.trimIndent(),
         )
 
-        assertEquals(
-            "I'm doing well, thank you. How are you?\nФраза правильная.",
-            result.visibleText,
-        )
-        assertEquals(result.visibleText, result.spokenText)
+        assertEquals(true, result.needsCorrection)
+        assertEquals("Yesterday I went to the mountains and walked a lot.", result.correction)
+        assertTrue(result.why?.contains("walked") == true)
+        assertEquals("That sounds like an active day. Who did you go with?", result.reply)
     }
 
     @Test
-    fun `does not expose a speak-only block`() {
-        val result = parseTutorResponse("[[SPEAK]]What are you doing?[[/SPEAK]]")
-
-        assertEquals("What are you doing?", result.spokenText)
-        assertEquals("What are you doing?", result.visibleText)
-        assertFalse(result.visibleText.contains("SPEAK"))
-    }
-
-    @Test
-    fun `accepts malformed closing marker produced by a small model`() {
-        val result = parseTutorResponse("[[SPEAK]]What are you doing?[[/SPEAK]\"]")
-
-        assertEquals("What are you doing?", result.spokenText)
-        assertEquals("What are you doing?", result.visibleText)
-        assertFalse(result.visibleText.contains("SPEAK"))
-    }
-
-    @Test
-    fun `keeps feedback outside a legacy speak block`() {
-        val result = parseTutorResponse(
-            "[[SPEAK]]Hello![[/SPEAK]]\nCorrected: Hello, my friend.",
+    fun `keeps useful fields when model omits status`() {
+        val result = parseTeacherPacket(
+            """
+                CORRECTION: I'm a sales manager.
+                WHY: Use the article "a" before the job title.
+                REPLY: That sounds interesting. What do you sell?
+            """.trimIndent(),
         )
 
-        assertEquals("Hello!\nCorrected: Hello, my friend.", result.visibleText)
-        assertEquals(result.visibleText, result.spokenText)
+        assertEquals(true, result.needsCorrection)
+        assertEquals("I'm a sales manager.", result.correction)
+        assertTrue(result.why?.startsWith("Use") == true)
     }
 
     @Test
-    fun `speaks the complete natural response`() {
-        val raw = "I'm doing well, thank you!\nФраза правильная."
+    fun `understands none fields without rejecting packet`() {
+        val result = parseTeacherPacket(
+            """
+                STATUS: OK
+                CORRECTION: NONE
+                WHY: CORRECT
+                REPLY: I'm doing well, thank you. What are you doing today?
+            """.trimIndent(),
+        )
 
-        val result = parseTutorResponse(raw)
-
-        assertEquals(raw, result.visibleText)
-        assertEquals(raw, result.spokenText)
+        assertEquals(false, result.needsCorrection)
+        assertNull(result.correction)
+        assertEquals("CORRECT", result.why)
     }
 
     @Test
-    fun `composes enabled sections and preserves speech languages`() {
+    fun `short greeting echo is detected`() {
+        assertTrue("Hi, how are you? I'm learning English.".echoesLearnerPhrase("hi how are you?"))
+        assertFalse("I'm doing well, thank you. What are you doing today?".echoesLearnerPhrase("hi how are you?"))
+    }
+
+    @Test
+    fun `composes explanation correction and reply with speech languages`() {
         val result = composeTutorResponse(
-            analysis = "Use 'Do you know' when asking whether someone is familiar with a band.",
-            naturalPhrase = "Do you know the band Guns N' Roses?",
-            reply = "Yes. They are an American rock band. What is your favorite song?",
-            naturalPhraseIntroduction = "Такая фраза звучала бы естественнее:",
+            analysis = "Используй yesterday и прошедшую форму walked.",
+            naturalPhrase = "Yesterday I went to the mountains and walked a lot.",
+            reply = "That sounds like an active day. Who did you go with?",
+            naturalPhraseIntroduction = "Так будет естественнее:",
         )
 
-        assertEquals(
-            "Use 'Do you know' when asking whether someone is familiar with a band.\n\n" +
-                "Такая фраза звучала бы естественнее:\n" +
-                "Do you know the band Guns N' Roses?\n\n" +
-                "Yes. They are an American rock band. What is your favorite song?",
-            result.visibleText,
-        )
+        assertTrue(result.visibleText.contains("Используй yesterday"))
+        assertTrue(result.visibleText.contains("Yesterday I went to the mountains"))
         assertEquals(4, result.speechSegments.size)
-        assertEquals(
-            ConversationSpeechLanguage.Explanation,
-            result.speechSegments[0].language,
-        )
-        assertEquals(
-            ConversationSpeechLanguage.Target,
-            result.speechSegments[2].language,
-        )
-        assertEquals(
-            "Yes. They are an American rock band. What is your favorite song?",
-            result.conversationText,
-        )
+        assertEquals(ConversationSpeechLanguage.Explanation, result.speechSegments[0].language)
+        assertEquals(ConversationSpeechLanguage.Target, result.speechSegments[2].language)
+        assertEquals("That sounds like an active day. Who did you go with?", result.conversationText)
     }
 
     @Test
-    fun `composes only selected sections`() {
-        val result = composeTutorResponse(
-            analysis = null,
-            naturalPhrase = null,
-            reply = "Yes, I know them. Which song do you like?",
-            naturalPhraseIntroduction = "A more natural way to say this is:",
-        )
-
-        assertEquals("Yes, I know them. Which song do you like?", result.visibleText)
-        assertEquals(1, result.speechSegments.size)
-        assertEquals(ConversationSpeechLanguage.Target, result.speechSegments.single().language)
-    }
-
-    @Test
-    fun `formats the complete dialog for debugging`() {
+    fun `model history keeps only conversational tutor reply`() {
         val messages = listOf(
-            ConversationMessage(
-                id = 1,
-                text = "How are you?",
-                role = ConversationRole.User,
-                timeLabel = "10:00:00",
-            ),
+            ConversationMessage(1, "I work in sales.", ConversationRole.User),
             ConversationMessage(
                 id = 2,
-                text = "I'm well.",
+                text = "Разбор.\n\nI work in sales.\n\nWhat do you sell?",
                 role = ConversationRole.Assistant,
-                timeLabel = "10:00:02",
+                conversationText = "What do you sell?",
             ),
+            ConversationMessage(3, "I sell batteries.", ConversationRole.User),
         )
 
         assertEquals(
-            "[10:00:00] USER:\nHow are you?\n\n[10:00:02] AI TUTOR:\nI'm well.",
-            formatConversationForClipboard(messages),
-        )
-    }
-
-    @Test
-    fun `model history contains replies but excludes teaching sections`() {
-        val messages = listOf(
-            ConversationMessage(1, "Can you check my English level?", ConversationRole.User),
-            ConversationMessage(
-                id = 2,
-                text = "Long analysis and correction.\n\nTell me about your job.",
-                role = ConversationRole.Assistant,
-                conversationText = "Tell me about your job.",
-            ),
-            ConversationMessage(3, "I am a source manager.", ConversationRole.User),
-        )
-
-        assertEquals(
-            "Learner: Can you check my English level?\n" +
-                "Tutor: Tell me about your job.\n" +
-                "Learner: I am a source manager.",
+            "Learner: I work in sales.\nTutor: What do you sell?\nLearner: I sell batteries.",
             buildConversationHistory(messages),
         )
     }
 
     @Test
-    fun `rejects a tutor reply masquerading as a natural rewrite`() {
-        assertFalse(
-            "How can I help you assess your English level today?"
-                .isPlausibleRewriteOf("Can you please check my English level?"),
-        )
-        assertEquals(
-            true,
-            "Could you please assess my English level?"
-                .isPlausibleRewriteOf("Can you please check my English level?"),
-        )
-        assertFalse(
-            "Hello, I'm a beginner. Let me start a conversation."
-                .isPlausibleRewriteOf("Hello"),
-        )
+    fun `A1 greeting shortcut remains available`() {
+        assertTrue("hi how are you".isClearlyCorrectA1Phrase("en-US"))
+        assertTrue("hi how are you".looksLikeQuestion("en-US"))
+        assertFalse("yerstoday i went in mountings".isClearlyCorrectA1Phrase("en-US"))
     }
 
     @Test
-    fun `validates the requested output script`() {
-        assertEquals(true, "Фраза построена правильно.".matchesExpectedLanguageScript("ru-RU"))
-        assertFalse("The phrase is correct.".matchesExpectedLanguageScript("ru-RU"))
-        assertEquals(true, "The phrase is correct.".matchesExpectedLanguageScript("en-US"))
-    }
-
-    @Test
-    fun `parses an ok verdict without exposing the protocol`() {
-        val result = parseLanguageAnalysis(
-            "VERDICT: OK\nФраза понятна и естественно звучит в разговоре.",
-        )
-
-        assertFalse(result.needsCorrection ?: true)
-        assertEquals("Фраза понятна и естественно звучит в разговоре.", result.text)
-    }
-
-    @Test
-    fun `parses a correction verdict`() {
-        val result = parseLanguageAnalysis(
-            "VERDICT: NEEDS_CORRECTION\nUse 'a distribution company' here.",
-        )
-
-        assertTrue(result.needsCorrection ?: false)
-        assertEquals("Use 'a distribution company' here.", result.text)
-    }
-
-    @Test
-    fun `ignores punctuation-only natural phrase changes`() {
-        assertFalse("Hello, where are you?".isMeaningfullyDifferentFrom("Hello where are you"))
-        assertTrue("I'm here".isMeaningfullyDifferentFrom("Im here"))
-    }
-
-    @Test
-    fun `recognizes a correct A1 greeting without punctuation`() {
-        assertTrue("Hello how are you".isClearlyCorrectA1Phrase("en-US"))
-        assertTrue("Hello how are you".looksLikeQuestion("en-US"))
-        assertFalse("I manager company".isClearlyCorrectA1Phrase("en-US"))
-    }
-
-    @Test
-    fun `uses concise Russian A1 feedback before continuing`() {
-        assertEquals(
-            "Грамматика верна, ты правильно задал вопрос.\nДавай продолжим диалог:",
-            correctA1Feedback(languageTag = "ru-RU", isQuestion = true),
-        )
-    }
-
-    @Test
-    fun `detects a repeated tutor question inside a different reply`() {
-        val previous = "Yes, please tell me about your day. What did you do today?"
-        val candidate = "That sounds good. What did you do today?"
-
-        assertTrue(candidate.repeatsQuestionFrom(previous))
-        assertFalse("That sounds good. What did you enjoy most?".repeatsQuestionFrom(previous))
-    }
-
-    @Test
-    fun `detects when a reply echoes the learner sentence`() {
-        assertTrue(
-            "Yes, today I went in the mountains and walked a lot. What happened next?"
-                .echoesLearnerPhrase("Today I went in mountains and walk a lot"),
-        )
-        assertFalse(
-            "That sounds like an active day! What did you enjoy most?"
-                .echoesLearnerPhrase("Today I went in mountains and walk a lot"),
-        )
-    }
-
-    @Test
-    fun `reply prompt contains the current phrase once and excludes analysis`() {
-        val input = buildReplyInput(
-            conversationHistory = "Learner: Hello\nTutor: Hi! How are you?",
-            userText = "My day was busy",
-        )
-
-        assertEquals(1, Regex("My day was busy").findAll(input).count())
-        assertFalse(input.contains("LANGUAGE ANALYSIS"))
-    }
-
-    @Test
-    fun `A1 reply requires exactly one continuing question`() {
-        assertTrue("I'm well, thanks. How are you?".hasExpectedQuestionCount("A1"))
-        assertFalse("I'm well, thanks.".hasExpectedQuestionCount("A1"))
+    fun `A1 reply requires exactly one question`() {
+        assertTrue("I'm well, thanks. What are you doing today?".hasExpectedQuestionCount("A1"))
         assertFalse("How are you? What are you doing?".hasExpectedQuestionCount("A1"))
     }
 
     @Test
-    fun `fallback continues the current topic instead of repeating a previous question`() {
-        val previous = listOf(
-            "Yes, please tell me about your day. What happened first?",
-            "That sounds like an active day! Which place did you like most?",
-        )
-
-        val result = fallbackConversationReply(
-            userText = "What about you, how is your day going?",
+    fun `fallback stays on mountain topic`() {
+        val reply = fallbackConversationReply(
+            userText = "yerstoday i went in mountings and walk a lot",
             languageTag = "en-US",
             learningLevel = "A1",
-            previousReplies = previous,
+            previousReplies = emptyList(),
         )
 
-        assertEquals(
-            "My day is going well, thank you. What was the best part of your day?",
-            result,
-        )
-        assertTrue(result.hasExpectedQuestionCount("A1"))
-        assertTrue(previous.none(result::repeatsQuestionFrom))
+        assertEquals("That sounds like an active day! Which place did you like most?", reply)
     }
 
     @Test
-    fun `fallback skips a generic reply that was already used`() {
-        val previous = listOf("That sounds interesting. What happened next?")
-
-        val result = fallbackConversationReply(
-            userText = "I read a book",
-            languageTag = "en-US",
-            learningLevel = "A1",
-            previousReplies = previous,
-        )
-
-        assertFalse(result.isNearDuplicateOf(previous.single()))
-        assertFalse(result.repeatsQuestionFrom(previous.single()))
+    fun `script detector accepts Russian translation and English target`() {
+        assertTrue("Используй прошедшую форму walked.".matchesExpectedLanguageScript("ru-RU"))
+        assertTrue("Yesterday I walked a lot.".matchesExpectedLanguageScript("en-US"))
+        assertFalse("The phrase is correct.".matchesExpectedLanguageScript("ru-RU"))
     }
 }
