@@ -25,6 +25,7 @@ class ModelDiagnostics {
 
     fun clear() {
         _events.value = emptyList()
+        SpeechSubmissionTiming.clear()
     }
 
     fun record(source: String, text: String) {
