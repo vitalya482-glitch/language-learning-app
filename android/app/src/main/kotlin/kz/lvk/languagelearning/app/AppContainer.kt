@@ -17,9 +17,13 @@ class AppContainer(context: Context) {
 
     val settingsRepository: SettingsRepository = SharedPreferencesSettingsRepository(appContext)
     val localModelManager: LocalModelManager = LocalModelManager(appContext)
+    val modelDiagnostics = ModelDiagnostics()
 
     val languageModelEngine: LanguageModelEngine by lazy {
-        NativeLanguageModelEngine()
+        LoggingLanguageModelEngine(
+            delegate = NativeLanguageModelEngine(),
+            diagnostics = modelDiagnostics,
+        )
     }
 
     val updateManager = UpdateManager(
