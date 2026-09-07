@@ -4,6 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -11,6 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Job
@@ -19,6 +26,7 @@ import kz.lvk.languagelearning.core.ai.LocalModelDescriptor
 import kz.lvk.languagelearning.core.designsystem.LanguageLearningTheme
 import kz.lvk.languagelearning.core.models.LocalModelStatus
 import kz.lvk.languagelearning.core.speech.SpeechLanguage
+import kz.lvk.languagelearning.feature.conversation.ConversationRole
 import kz.lvk.languagelearning.feature.conversation.ConversationScreen
 import kz.lvk.languagelearning.feature.conversation.ConversationViewModel
 import kz.lvk.languagelearning.feature.home.HomeScreen
@@ -40,6 +48,7 @@ class MainActivity : ComponentActivity() {
             val updateState by mainViewModel.updateState.collectAsStateWithLifecycle()
             val appSettings by app.container.settingsRepository.settings.collectAsStateWithLifecycle()
             val localModelsState by app.container.localModelManager.state.collectAsStateWithLifecycle()
+            val diagnosticEvents by app.container.modelDiagnostics.events.collectAsStateWithLifecycle()
             val targetSpeechLanguage = SpeechLanguage(appSettings.targetLanguageTag)
             val nativeSpeechLanguage = SpeechLanguage(appSettings.nativeLanguageTag)
 
@@ -102,6 +111,19 @@ class MainActivity : ComponentActivity() {
                             conversationViewModel.loadEngine()
                         }
                         val conversationState by conversationViewModel.state.collectAsStateWithLifecycle()
+                        val lastAssistantMessage = conversationState.messages.lastOrNull {
+                            it.role == ConversationRole.Assistant
+                        }
+                        var lastLoggedAssistantId by remember(conversationKey) {
+                            mutableStateOf<Long?>(null)
+                        }
+                        LaunchedEffect(lastAssistantMessage?.id) {
+                            val message = lastAssistantMessage ?: return@LaunchedEffect
+                            if (message.id != lastLoggedAssistantId) {
+                                app.container.modelDiagnostics.record("AI TUTOR", message.text)
+                                lastLoggedAssistantId = message.id
+                            }
+                        }
 
                         val closeConversation = {
                             conversationViewModel.closeSession()
@@ -116,25 +138,37 @@ class MainActivity : ComponentActivity() {
                             Unit
                         }
                         BackHandler(onBack = closeConversation)
-                        ConversationScreen(
-                            state = conversationState,
-                            onBack = closeConversation,
-                            onSendMessage = conversationViewModel::sendMessage,
-                            onRetryEngine = conversationViewModel::retry,
-                            speechLanguage = targetSpeechLanguage,
-                            nativeSpeechLanguage = nativeSpeechLanguage,
-                            explanationSpeechLanguage = SpeechLanguage(
-                                appSettings.explanationLanguage.tag,
-                            ),
-                            ttsVoiceId = appSettings.targetVoiceId,
-                            explanationTtsVoiceId = appSettings.explanationVoiceId,
-                            nativeTtsVoiceId =
-                                appSettings.explanationTtsVoiceIdsByLanguage[
-                                    appSettings.nativeLanguageTag
-                                ] ?: appSettings.ttsVoiceIdsByLanguage[
-                                    appSettings.nativeLanguageTag
-                                ],
-                        )
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            ConversationScreen(
+                                state = conversationState,
+                                onBack = closeConversation,
+                                onSendMessage = { text ->
+                                    app.container.modelDiagnostics.record("USER", text)
+                                    conversationViewModel.sendMessage(text)
+                                },
+                                onRetryEngine = conversationViewModel::retry,
+                                speechLanguage = targetSpeechLanguage,
+                                nativeSpeechLanguage = nativeSpeechLanguage,
+                                explanationSpeechLanguage = SpeechLanguage(
+                                    appSettings.explanationLanguage.tag,
+                                ),
+                                ttsVoiceId = appSettings.targetVoiceId,
+                                explanationTtsVoiceId = appSettings.explanationVoiceId,
+                                nativeTtsVoiceId =
+                                    appSettings.explanationTtsVoiceIdsByLanguage[
+                                        appSettings.nativeLanguageTag
+                                    ] ?: appSettings.ttsVoiceIdsByLanguage[
+                                        appSettings.nativeLanguageTag
+                                    ],
+                            )
+                            ConversationDiagnosticsOverlay(
+                                events = diagnosticEvents,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .statusBarsPadding()
+                                    .padding(top = 8.dp, end = 8.dp),
+                            )
+                        }
                     }
 
                     showSettings -> {
@@ -171,6 +205,7 @@ class MainActivity : ComponentActivity() {
                                     if (engineUnloadJob === pendingUnload) engineUnloadJob = null
                                     app.container.localModelManager.refresh()
                                     app.container.localModelManager.prepareSelectedModelForUse()
+                                    app.container.modelDiagnostics.clear()
                                     showConversation = true
                                 }
                             },
