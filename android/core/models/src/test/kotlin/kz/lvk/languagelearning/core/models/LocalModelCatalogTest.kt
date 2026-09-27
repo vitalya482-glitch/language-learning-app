@@ -9,7 +9,7 @@ class LocalModelCatalogTest {
     fun `catalog contains unique verified model artifacts`() {
         val models = LocalModelCatalog.all
 
-        assertEquals(3, models.size)
+        assertEquals(4, models.size)
         assertEquals(models.size, models.map { it.id }.distinct().size)
         assertEquals(models.size, models.map { it.fileName }.distinct().size)
         models.forEach { model ->

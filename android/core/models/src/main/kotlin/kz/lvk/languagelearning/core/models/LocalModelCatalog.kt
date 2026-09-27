@@ -60,12 +60,28 @@ object LocalModelCatalog {
         licenseLabel = "Apache 2.0",
         minimumRamBytes = 6_800_000_000L,
         minimumAvailableRamBytes = 3_200_000_000L,
+        qualityRank = 4,
+    )
+
+    val Gemma3_4BIt_Q4KM = LocalModelSpec(
+        id = "gemma3-4b-it-q4-k-m",
+        displayName = "Gemma 3 4B Instruct · экспериментальная",
+        description = "Мультиязычная диалоговая модель Google для сравнения естественности ответов с Qwen3.",
+        fileName = "gemma-3-4b-it-q4_k_m.gguf",
+        downloadUrl = "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf?download=true",
+        sha256 = "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
+        estimatedSizeBytes = 2_489_757_856L,
+        sourceLabel = "Hugging Face · ggml-org / Google Gemma",
+        licenseLabel = "Gemma Terms of Use",
+        minimumRamBytes = 6_800_000_000L,
+        minimumAvailableRamBytes = 3_200_000_000L,
         qualityRank = 3,
     )
 
     val all: List<LocalModelSpec> = listOf(
         Qwen3_0_6B_Q4KM,
         Qwen3_1_7B_Q4KM,
+        Gemma3_4BIt_Q4KM,
         Qwen3_4B_Q4KM,
     )
 
